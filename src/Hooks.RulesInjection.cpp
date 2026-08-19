@@ -37,7 +37,7 @@ DEFINE_HOOK(0x668BF0, RulesClass_ReadFile_TraitInjection, 0x5)
 
     ++TraitInjection::PassCount;
 
-    const bool isRulesINI = (pINI == &CCINIClass::INI_Rules.get());
+    const bool isRulesINI = (pINI == CCINIClass::INI_Rules);
     Debug::Log("[TraitExt] Read_File pass %d: pRules=%p pINI=%p%s\n",
         TraitInjection::PassCount, pRules, pINI,
         isRulesINI ? " (INI_Rules)" : "");
