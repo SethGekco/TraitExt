@@ -88,6 +88,64 @@ passes really fire (predicted: rulesmd x3 via `RulesClass::Init`, plus game mode
 and map). Traits apply on the first pass only; later passes are skipped by the
 `$Applied` guard.
 
+## Extra block — composition, list modes, per-key modes, wider targets
+
+```ini
+[TraitExt]
+RandomSeed=12345
+TargetLists=Warheads       ; widen scope beyond the 4 TechnoType lists
+
+[TraitTargets]
+0=NUKE                     ; target an individual section directly
+
+[TraitTypes]
+6=T_Base
+7=T_Composed
+8=T_Lists
+9=T_PerKey
+
+; --- composition: T_Composed pulls in T_Base, then overrides on top ----
+[T_Base]
+Merge=Addition
+Strength=+100
+[T_Composed]
+Traits=T_Base              ; composed first...
+Merge=Addition
+Strength=+50               ; ...so this stacks: base +100 then +50
+
+; --- element-wise CSV list editing ------------------------------------
+[T_Lists]
+Merge=Append
+Prerequisite=NAPOWR        ; adds without restating the whole list
+[T_Lists2]
+Merge=Remove
+Prerequisite=NAHAND        ; drops just that entry
+
+; --- per-key mode override --------------------------------------------
+[T_PerKey]
+Merge=Override             ; trait default...
+Strength=+25
+Strength.Merge=Add         ; ...but this one key adds instead
+Armor=heavy                ; still Override
+
+[FLAKT]
+Traits=T_Composed          ; expect Strength base +150 total
+
+[DRED]
+Traits=T_PerKey
+```
+
+Expect log lines like:
+```
+[TraitExt] trait 'T_Composed' Merge=Add keys=1 composes=1
+[TraitExt]   FLAKT.Strength: '400' -> '550'
+[TraitExt]   DRED.Strength: '...' -> '...+25'
+```
+
+A cycle (`[T_A] Traits=T_B` and `[T_B] Traits=T_A`) logs
+`trait cycle detected at '...', cutting` and does **not** hang — unlike Phobos's
+`$Inherits`, which stack-overflows on a cycle.
+
 ## Checklist
 
 | # | Test | Pass condition |
@@ -104,6 +162,12 @@ and map). Traits apply on the first pass only; later passes are skipped by the
 | 10 | Idempotency | Strength does **not** grow on later passes |
 | 11 | Ordering-free | move `[T_Beefy]` to the very bottom of the file; results identical |
 | 12 | In-game | GGI visibly tougher / cheaper than vanilla |
+| 13 | Composition | `T_Composed` reports `composes=1`; FLAKT gains both bonuses |
+| 14 | Append | `Prerequisite` gains an entry, rest of list intact |
+| 15 | Remove | named entry dropped, rest intact |
+| 16 | Per-key mode | `Strength` adds while `Armor` overrides in the same trait |
+| 17 | Cycle safety | cycle logs "cutting", game still loads |
+| 18 | Wider targets | a `[Warheads]` member / `[TraitTargets]` section is modified |
 
 ## Ordering (why position never matters)
 
