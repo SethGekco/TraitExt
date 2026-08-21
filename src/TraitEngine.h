@@ -18,15 +18,22 @@ namespace TraitExt
         Multiply,   // numeric *=
         Min,        // numeric clamp low
         Max,        // numeric clamp high
-        Average     // mean of all Average-mode contributors for that key
+        Average,    // mean of all Average-mode contributors for that key
+        Append,     // CSV list: add items not already present
+        Remove      // CSV list: drop the listed items
     };
 
     struct TraitDef
     {
         std::string Name;
         MergeMode Mode = MergeMode::Override;
+        // Traits this trait is composed of; expanded before its own entries so
+        // the trait's own keys act as the more specific override.
+        std::vector<std::string> Composes;
         // Author order is preserved: fold order is declaration order.
         std::vector<std::pair<std::string, std::string>> Entries;
+        // Per-key mode overrides from "<Key>.Merge=" inside the trait section.
+        std::vector<std::pair<std::string, MergeMode>> KeyModes;
     };
 
     // Load-time trait resolution. Runs at the RulesClass::Read_File entry seam

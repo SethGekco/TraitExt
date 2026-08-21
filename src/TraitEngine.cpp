@@ -110,6 +110,8 @@ namespace TraitExt
             if (v == "min")                        return MergeMode::Min;
             if (v == "max")                        return MergeMode::Max;
             if (v == "average" || v == "mean")     return MergeMode::Average;
+            if (v == "append" || v == "listadd")   return MergeMode::Append;
+            if (v == "remove" || v == "listremove")return MergeMode::Remove;
             return fallback;
         }
 
@@ -123,6 +125,8 @@ namespace TraitExt
             case MergeMode::Min:      return "Min";
             case MergeMode::Max:      return "Max";
             case MergeMode::Average:  return "Average";
+            case MergeMode::Append:   return "Append";
+            case MergeMode::Remove:   return "Remove";
             default:                  return "Override";
             }
         }
@@ -220,6 +224,38 @@ namespace TraitExt
                     continue;
                 }
 
+                // List modes operate element-wise on CSV values, so a trait can
+                // add a prerequisite without restating the whole list.
+                if (c.Mode == MergeMode::Append || c.Mode == MergeMode::Remove)
+                {
+                    std::vector<std::string> items = SplitCSV(cur);
+                    const std::vector<std::string> operand = SplitCSV(c.Value);
+
+                    for (const auto& op : operand)
+                    {
+                        const auto it = std::find(items.begin(), items.end(), op);
+                        if (c.Mode == MergeMode::Append)
+                        {
+                            if (it == items.end())
+                                items.push_back(op);
+                        }
+                        else if (it != items.end())
+                        {
+                            items.erase(it);
+                        }
+                    }
+
+                    std::string joined;
+                    for (size_t i = 0; i < items.size(); ++i)
+                    {
+                        if (i)
+                            joined += ',';
+                        joined += items[i];
+                    }
+                    cur = joined;
+                    continue;
+                }
+
                 // Numeric modes need both sides numeric; anything else Overrides,
                 // which is what makes "Radar=yes" behave sanely under Merge=Add.
                 double lhs = 0.0, rhs = 0.0;
@@ -262,6 +298,39 @@ namespace TraitExt
             }
 
             return cur;
+        }
+
+        // Flatten a trait's Composes= chain into `out`, depth-first, with the
+        // trait's own contribution appended last so its keys win. Cycles are
+        // reported and cut (Phobos's own $Inherits has no such guard).
+        void ExpandTrait(const std::string& name,
+            const std::unordered_map<std::string, TraitDef>& traits,
+            std::vector<const TraitDef*>& out,
+            std::vector<std::string>& stack,
+            const char* target)
+        {
+            if (std::find(stack.begin(), stack.end(), name) != stack.end())
+            {
+                Debug::Log("[TraitExt] WARN %s: trait cycle detected at '%s', cutting\n",
+                    target, name.c_str());
+                return;
+            }
+
+            const auto it = traits.find(name);
+            if (it == traits.end())
+            {
+                Debug::Log("[TraitExt] WARN %s: unknown trait '%s' (not in [TraitTypes])\n",
+                    target, name.c_str());
+                return;
+            }
+
+            stack.push_back(name);
+            for (const auto& child : it->second.Composes)
+                ExpandTrait(child, traits, out, stack, target);
+            stack.pop_back();
+
+            if (std::find(out.begin(), out.end(), &it->second) == out.end())
+                out.push_back(&it->second);
         }
 
         void ReadListSection(CCINIClass* pINI, const char* section, std::vector<std::string>& out)
@@ -312,19 +381,34 @@ namespace TraitExt
             def.Mode = ParseMode(ReadKey(pINI, name.c_str(), "Merge", "Override"),
                 MergeMode::Override);
 
+            def.Composes = SplitCSV(ReadKey(pINI, name.c_str(), "Traits"));
+
             const int keyCount = pINI->GetKeyCount(name.c_str());
             for (int i = 0; i < keyCount; ++i)
             {
                 const char* keyName = pINI->GetKeyName(name.c_str(), i);
-                if (!keyName || !std::strcmp(keyName, "Merge"))
+                if (!keyName || !std::strcmp(keyName, "Merge") || !std::strcmp(keyName, "Traits"))
                     continue;
                 if (keyName[0] == '$')
                     continue; // leave $Inherits and friends to Phobos
+
+                // "<Key>.Merge=" sets the mode for one key only.
+                const std::string keyStr(keyName);
+                const std::string suffix = ".Merge";
+                if (keyStr.size() > suffix.size() &&
+                    keyStr.compare(keyStr.size() - suffix.size(), suffix.size(), suffix) == 0)
+                {
+                    def.KeyModes.emplace_back(keyStr.substr(0, keyStr.size() - suffix.size()),
+                        ParseMode(ReadKey(pINI, name.c_str(), keyName), def.Mode));
+                    continue;
+                }
+
                 def.Entries.emplace_back(keyName, ReadKey(pINI, name.c_str(), keyName));
             }
 
-            Debug::Log("[TraitExt] trait '%s' Merge=%s keys=%d\n",
-                name.c_str(), ModeName(def.Mode), static_cast<int>(def.Entries.size()));
+            Debug::Log("[TraitExt] trait '%s' Merge=%s keys=%d composes=%d\n",
+                name.c_str(), ModeName(def.Mode), static_cast<int>(def.Entries.size()),
+                static_cast<int>(def.Composes.size()));
             traits.emplace(name, std::move(def));
         }
 
@@ -340,9 +424,24 @@ namespace TraitExt
         }
 
         // ---- 2. Targets ---------------------------------------------------
+        // Default scope is the four TechnoType lists; [TraitExt] TargetLists=
+        // adds more list sections (Warheads, SuperWeaponTypes, ...) and
+        // [TraitTargets] names individual sections directly.
         std::vector<std::string> targets;
+
+        std::vector<std::string> listSections;
         for (const char* list : TargetLists)
-            ReadListSection(pINI, list, targets);
+            listSections.emplace_back(list);
+        for (const auto& extra : SplitCSV(ReadKey(pINI, SectConfig, "TargetLists")))
+        {
+            if (std::find(listSections.begin(), listSections.end(), extra) == listSections.end())
+                listSections.push_back(extra);
+        }
+
+        for (const auto& list : listSections)
+            ReadListSection(pINI, list.c_str(), targets);
+
+        ReadListSection(pINI, "TraitTargets", targets);
 
         std::sort(targets.begin(), targets.end());
         targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
@@ -420,15 +519,20 @@ namespace TraitExt
                         target.c_str(), name.c_str());
                     continue;
                 }
-                const auto it = traits.find(name);
-                if (it == traits.end())
-                {
-                    Debug::Log("[TraitExt] WARN %s: unknown trait '%s' (not in [TraitTypes])\n",
-                        target.c_str(), name.c_str());
-                    continue;
-                }
                 seen.push_back(name);
-                resolved.push_back(&it->second);
+
+                std::vector<std::string> stack;
+                ExpandTrait(name, traits, resolved, stack, target.c_str());
+            }
+
+            // A composed trait can be pulled in indirectly; honour blocks on it.
+            if (!blocked.empty())
+            {
+                resolved.erase(std::remove_if(resolved.begin(), resolved.end(),
+                    [&blocked](const TraitDef* def)
+                    {
+                        return std::find(blocked.begin(), blocked.end(), def->Name) != blocked.end();
+                    }), resolved.end());
             }
 
             if (resolved.empty())
@@ -442,8 +546,19 @@ namespace TraitExt
             {
                 for (const auto& entry : def->Entries)
                 {
+                    // Mode precedence: value sigil > "<Key>.Merge" > trait Merge=.
+                    MergeMode keyMode = def->Mode;
+                    for (const auto& km : def->KeyModes)
+                    {
+                        if (km.first == entry.first)
+                        {
+                            keyMode = km.second;
+                            break;
+                        }
+                    }
+
                     std::string value;
-                    const MergeMode mode = ModeForValue(entry.second, def->Mode, value);
+                    const MergeMode mode = ModeForValue(entry.second, keyMode, value);
 
                     auto it = byKey.find(entry.first);
                     if (it == byKey.end())
