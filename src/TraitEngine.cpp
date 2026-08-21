@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cstdint>
+#include <cctype>
 #include <cmath>
 #include <algorithm>
 #include <unordered_map>
