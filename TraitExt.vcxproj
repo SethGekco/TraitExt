@@ -24,6 +24,7 @@
     <ClCompile Include="src\TraitExt.cpp" />
     <ClCompile Include="src\Phobos.cpp" />
     <ClCompile Include="src\Hooks.RulesInjection.cpp" />
+    <ClCompile Include="src\TraitEngine.cpp" />
     <ClCompile Include="YRpp\StaticInits.cpp" />
     <!-- Phobos utility implementations -->
     <ClCompile Include="Phobos\src\Utilities\Debug.cpp" />
@@ -34,6 +35,7 @@
   <!-- Header files -->
   <ItemGroup>
     <ClInclude Include="src\TraitExt.h" />
+    <ClInclude Include="src\TraitEngine.h" />
   </ItemGroup>
 
   <PropertyGroup Label="Globals">

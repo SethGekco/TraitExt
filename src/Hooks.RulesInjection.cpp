@@ -1,4 +1,4 @@
-// P2 groundwork: the trait/random injection seam.
+// The trait resolution seam.
 //
 // 0x668BF0 = RulesClass::Read_File(CCINIClass*) ENTRY (YRpp identity; the
 // framework name "RulesClass_Addition" is misleading). Binary-verified
@@ -8,16 +8,17 @@
 // here is visible to the vanilla section readers that follow, and to Phobos's
 // lazy $Inherits resolution (0x528BAC) on first read of a section.
 //
-// Phase 1 (this file): proof of life — log each pass so the in-game debug.log
-// shows the seam firing and chaining cleanly beside Phobos's return-0 hook at
-// the same address.
+// Because it fires repeatedly, the engine guards itself with a per-INI applied
+// flag — folding Add/Multiply more than once would compound silently.
 //
-// SEED CAVEAT for later logical randoms: the three Init passes run at program
-// init, before the scenario's synced seed — Logical per-type rolls must happen
-// only in scenario-load passes (or at LoadTypesFromINI time). Cosmetic rolls
-// may happen in any pass.
+// SEED CAVEAT for later per-instance logical randoms: the three Init passes run
+// at program init, before the scenario's synced seed exists. Load-time random
+// here is therefore DETERMINISTIC (seeded from [TraitExt] RandomSeed + the
+// section name), which is sync-safe by construction: every client reads the same
+// INI and draws the same picks.
 
 #include "TraitExt.h"
+#include "TraitEngine.h"
 
 #include <Phobos.h>
 #include <Utilities/Debug.h>
@@ -42,8 +43,7 @@ DEFINE_HOOK(0x668BF0, RulesClass_ReadFile_TraitInjection, 0x5)
         TraitInjection::PassCount, pRules, pINI,
         isRulesINI ? " (INI_Rules)" : "");
 
-    // TODO(P2): resolve [TraitTypes], roll random pools (cosmetic only until
-    // seed timing is verified), and write chosen $Inherits/keys into pINI here.
+    TraitExt::Engine::ProcessINI(pINI);
 
     return 0;
 }
