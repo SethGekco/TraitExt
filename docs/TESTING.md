@@ -183,10 +183,13 @@ traits resolve after the whole INI is parsed. Test 11 proves it.
   If a key isn't written anywhere in the INI, the engine can't know the engine's
   built-in default, so it logs a WARN and applies the trait value as `Override`.
   In practice most rules keys are present in `rulesmd.ini`.
-- **Scalars only.** Comma-lists (e.g. `Prerequisite=`) are treated as
-  non-numeric, so they Override rather than merge element-wise.
-- **Targets are TechnoTypes** — sections listed in `[VehicleTypes]`,
-  `[InfantryTypes]`, `[BuildingTypes]`, `[AircraftTypes]`.
+- **Comma-lists need an explicit list mode.** Under numeric modes a CSV value is
+  non-numeric and therefore Overrides. To edit a list element-wise use
+  `Merge=Append` / `Merge=Remove` (or `<Key>.Merge=Append`).
+- **Targets default to TechnoTypes** — sections listed in `[VehicleTypes]`,
+  `[InfantryTypes]`, `[BuildingTypes]`, `[AircraftTypes]`. Widen with
+  `[TraitExt] TargetLists=` (more list sections) or `[TraitTargets]` (individual
+  sections).
 - **Random is per-type and deterministic**, not per-instance and not per-match.
   Per-instance random (each soldier a different voice) is a later phase and needs
   the synced-RNG work.
