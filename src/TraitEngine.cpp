@@ -456,7 +456,12 @@ namespace TraitExt
             std::vector<std::string> wanted = SplitCSV(ReadKey(pINI, target.c_str(), "Traits"));
 
             // ---- 3. Random pool (deterministic; identical on every client) --
-            const std::string poolStr = ReadKey(pINI, target.c_str(), "TraitsRandom");
+            // "TraitsRandomPool" is the clearer name (it sits next to
+            // TraitsRandomCount, which is a min,max range rather than a list);
+            // "TraitsRandom" stays accepted as an alias.
+            std::string poolStr = ReadKey(pINI, target.c_str(), "TraitsRandomPool");
+            if (poolStr.empty())
+                poolStr = ReadKey(pINI, target.c_str(), "TraitsRandom");
             if (!poolStr.empty())
             {
                 std::vector<std::string> pool = SplitCSV(poolStr);
@@ -472,9 +477,12 @@ namespace TraitExt
                     if (countParts.size() >= 2 && ParseNumber(countParts[1], tmp))
                         hi = static_cast<int>(tmp);
 
-                    lo = (std::max)(0, lo);
-                    hi = (std::max)(lo, hi);
-                    hi = (std::min)(hi, static_cast<int>(pool.size()));
+                    // Clamp BOTH ends to the pool size. Clamping only the max
+                    // lets min exceed it, which inverts the range and makes the
+                    // span negative (undefined once cast for the modulo).
+                    const int poolSize = static_cast<int>(pool.size());
+                    lo = (std::max)(0, (std::min)(lo, poolSize));
+                    hi = (std::min)(poolSize, (std::max)(lo, hi));
 
                     std::uint32_t state = globalSeed ^ HashString(target);
                     if (!state)
