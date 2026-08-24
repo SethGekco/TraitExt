@@ -2,6 +2,7 @@
 
 #include <Phobos.h>
 #include <CCINIClass.h>
+#include <ScenarioClass.h>
 #include <Utilities/Debug.h>
 
 #include <cstdio>
@@ -160,6 +161,18 @@ namespace TraitExt
                 h *= 16777619u;
             }
             return h;
+        }
+
+        // splitmix32 finalizer — decorrelates nearby seeds. Matters because
+        // per-match seeds (Scenario UniqueID) can be close together, and raw
+        // xorshift32 on adjacent seeds produces visibly correlated first draws.
+        std::uint32_t MixSeed(std::uint32_t x)
+        {
+            x += 0x9E3779B9u;
+            x ^= x >> 16; x *= 0x21F0AAADu;
+            x ^= x >> 15; x *= 0x735A2D97u;
+            x ^= x >> 15;
+            return x;
         }
 
         std::uint32_t NextRand(std::uint32_t& state)
@@ -415,13 +428,33 @@ namespace TraitExt
         if (traits.empty())
             return;
 
+        // Seed selection. A FIXED seed means the same draw every launch forever,
+        // which makes "random" useless in practice. ScenarioClass::UniqueID is a
+        // per-match salt that is identical on every client, so it gives real
+        // per-match variety while staying sync-safe — but only once a scenario
+        // exists. Log what is actually available so the timing is provable.
+        const ScenarioClass* pScen = ScenarioClass::Instance;
+        const int uniqueID = pScen ? pScen->UniqueID : 0;
+        Debug::Log("[TraitExt] seed context: Scenario=%p UniqueID=%d\n", pScen, uniqueID);
+
         std::uint32_t globalSeed = 0x5EED1234u;
+        bool seedFromScenario = false;
         {
             const std::string seedStr = ReadKey(pINI, SectConfig, "RandomSeed");
             double parsed = 0.0;
-            if (ParseNumber(seedStr, parsed))
+            if (ParseNumber(seedStr, parsed) && static_cast<long long>(parsed) != 0)
+            {
                 globalSeed = static_cast<std::uint32_t>(static_cast<long long>(parsed));
+            }
+            else if (pScen && uniqueID != 0)
+            {
+                // RandomSeed=0 (or absent) => per-match seed when one exists.
+                globalSeed = static_cast<std::uint32_t>(uniqueID);
+                seedFromScenario = true;
+            }
         }
+        Debug::Log("[TraitExt] using seed %u (%s)\n", globalSeed,
+            seedFromScenario ? "per-match, from Scenario UniqueID" : "fixed from RandomSeed");
 
         // ---- 2. Targets ---------------------------------------------------
         // Default scope is the four TechnoType lists; [TraitExt] TargetLists=
@@ -484,7 +517,7 @@ namespace TraitExt
                     lo = (std::max)(0, (std::min)(lo, poolSize));
                     hi = (std::min)(poolSize, (std::max)(lo, hi));
 
-                    std::uint32_t state = globalSeed ^ HashString(target);
+                    std::uint32_t state = MixSeed(globalSeed ^ HashString(target));
                     if (!state)
                         state = 0x9E3779B9u;
 
