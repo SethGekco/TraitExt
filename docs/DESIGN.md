@@ -69,15 +69,42 @@ TraitExt should validate Trait graphs for cycles at load and reject them, since
 Traits are our sections; real-unit cycles remain the modder's problem under
 Phobos. This is the parity baseline.
 
+**The two pre-existing systems and the file-position question (verified
+2026-08-18):** there are TWO inheritance mechanisms in the wild with opposite
+ordering rules —
+- **Ares/Antares `[Child]:[Parent]` header syntax** = PARSE-TIME EAGER COPY
+  (Antares `Misc/IniSectionIncludes.cpp`, hooks inside `INIClass::Parse` at
+  `0x525CA5/0x525DDB` + copy at `0x525C28/0x525E44`): when the parser reaches
+  the child header it copies the parent's entries — so the parent **must appear
+  above the child** (or in an earlier-loaded file), else a log warning and no
+  inheritance. Also: it's a one-shot copy — later edits to the parent don't
+  propagate.
+- **Phobos `$Inherits`** = LAZY READ-TIME lookup against the fully-parsed INI —
+  **no position requirement at all**; the parent may sit anywhere, even in a
+  later `[$Include]`d file. (Phobos docs also state enabling it disables the
+  Ares equivalent.)
+
+**TraitExt guarantee: Trait position in the file NEVER matters.** Static goes
+through Phobos (lazy). Random/runtime resolution happens in TraitExt code at
+`Read_File` entry / lifecycle time, always against the fully-parsed INI object.
+Modders migrating from `[A]:[B]` syntax drop the ordering discipline entirely.
+
 ### 3.2 Random
 
 ```ini
 [Conscript]
-$RandomPool=T_VoiceA,T_VoiceB,T_VoiceC
-$RandomCount=1,1              ; min,max ; default 1,1
+TraitsRandomPool=T_VoiceA,T_VoiceB,T_VoiceC   ; the pool: any number of entries
+TraitsRandomCount=1,1         ; a min,max RANGE (not a per-entry list).
+                              ; "2" alone means exactly 2. Default 1,1, so the
+                              ; line can be omitted entirely.
 $RandomScope=Instance         ; Instance = each spawned unit rolls its own
                               ; Type     = one roll shared by the whole type
 ```
+
+> Naming note: the pool and the count are both comma-separated but mean
+> different things, which reads confusingly. Hence `TraitsRandomPool` (a list)
+> vs `TraitsRandomCount` (a range). `TraitsRandom` remains accepted as an alias
+> for the pool.
 
 Selection is just a strategy that emits Traits into the same applied set. When
 `RandomCount` > 1 and the picks conflict, the merge engine resolves them exactly

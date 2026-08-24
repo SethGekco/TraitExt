@@ -65,8 +65,9 @@ Traits=T_Beefy
 BlockTraits=T_Beefy       ; blocked -> nothing happens
 
 [HTNK]
-TraitsRandom=T_VoiceA,T_VoiceB,T_VoiceC
-TraitsRandomCount=1,1     ; exactly one, deterministic per RandomSeed
+TraitsRandomPool=T_VoiceA,T_VoiceB,T_VoiceC
+TraitsRandomCount=1,1     ; a min,max RANGE (not a list). "2"=exactly 2.
+                          ; default is 1,1 so this line is optional
 ```
 
 ## What to expect in debug.log
