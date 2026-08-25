@@ -145,7 +145,17 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
     return 0;
 }
 
-DEFINE_HOOK(0x6F4500, TechnoClass_DTOR_InstanceRandom, 0x6)
+// STOLEN SIZE MUST BE 0x5. The prologue is
+//   6F4500 51      push ecx
+//   6F4501 53      push ebx
+//   6F4502 56      push esi
+//   6F4503 8B F1   mov esi,ecx     <- cumulative exactly 5
+//   6F4505 33 DB   xor ebx,ebx
+// Declaring 0x6 splits `33 DB` and leaves a dangling `DB` byte, corrupting the
+// instruction stream and sending execution to a wild address. That is what
+// caused three reproducible C0000005 crashes at 0x09C00126 (an address in no
+// module at all). All four frameworks declare 0x5 here for this reason.
+DEFINE_HOOK(0x6F4500, TechnoClass_DTOR_InstanceRandom, 0x5)
 {
     GET(TechnoClass*, pThis, ECX);
     if (pThis)
