@@ -21,6 +21,30 @@ namespace TraitExt
 {
     namespace
     {
+        // Trait defs must outlive ProcessINI because instance pools point at
+        // them for the whole match.
+        std::unordered_map<std::string, TraitDef> g_Traits;
+        std::unordered_map<std::string, InstancePool> g_InstancePools;
+    }
+
+    namespace InstanceRandom
+    {
+        const InstancePool* Find(const char* typeID)
+        {
+            if (!typeID || g_InstancePools.empty())
+                return nullptr;
+            const auto it = g_InstancePools.find(typeID);
+            return (it == g_InstancePools.end()) ? nullptr : &it->second;
+        }
+
+        bool Any()
+        {
+            return !g_InstancePools.empty();
+        }
+    }
+
+    namespace
+    {
         constexpr const char* SectTraitTypes = "TraitTypes";
         constexpr const char* SectConfig = "TraitExt";
         constexpr const char* KeyApplied = "$Applied";
@@ -413,7 +437,9 @@ namespace TraitExt
         std::vector<std::string> traitNames;
         ReadListSection(pINI, SectTraitTypes, traitNames);
 
-        std::unordered_map<std::string, TraitDef> traits;
+        g_Traits.clear();
+        g_InstancePools.clear();
+        std::unordered_map<std::string, TraitDef>& traits = g_Traits;
         for (const auto& name : traitNames)
         {
             if (!pINI->GetSection(name.c_str()))
@@ -590,6 +616,48 @@ namespace TraitExt
             if (!poolStr.empty())
             {
                 std::vector<std::string> pool = SplitCSV(poolStr);
+
+                // Scope toggle. Type (default) = one draw at load shared by the
+                // whole type for the match. Instance = each unit draws its own
+                // at runtime.
+                const std::string scope = ReadKey(pINI, target.c_str(), "TraitsRandomScope", "Type");
+                const bool perInstance =
+                    (!scope.empty() && (scope[0] == 'I' || scope[0] == 'i'));
+
+                if (perInstance && !pool.empty())
+                {
+                    InstancePool ip;
+                    const std::vector<std::string> cp =
+                        SplitCSV(ReadKey(pINI, target.c_str(), "TraitsRandomCount", "1,1"));
+                    double tmp = 0.0;
+                    if (cp.size() >= 1 && ParseNumber(cp[0], tmp)) ip.CountMin = static_cast<int>(tmp);
+                    ip.CountMax = ip.CountMin;
+                    if (cp.size() >= 2 && ParseNumber(cp[1], tmp)) ip.CountMax = static_cast<int>(tmp);
+
+                    for (const auto& n : pool)
+                    {
+                        const auto it = traits.find(n);
+                        if (it == traits.end())
+                        {
+                            Debug::Log("[TraitExt] WARN %s: unknown trait '%s' in instance pool\n",
+                                target.c_str(), n.c_str());
+                            continue;
+                        }
+                        ip.Traits.push_back(&it->second);
+                    }
+
+                    if (!ip.Traits.empty())
+                    {
+                        const int poolN = static_cast<int>(ip.Traits.size());
+                        ip.CountMin = (std::max)(0, (std::min)(ip.CountMin, poolN));
+                        ip.CountMax = (std::min)(poolN, (std::max)(ip.CountMin, ip.CountMax));
+                        g_InstancePools[target] = ip;
+                        Debug::Log("[TraitExt] %s: registered PER-INSTANCE pool of %d (count %d..%d)\n",
+                            target.c_str(), poolN, ip.CountMin, ip.CountMax);
+                    }
+                    pool.clear(); // handled at runtime, not at load
+                }
+
                 if (!pool.empty())
                 {
                     int lo = 1, hi = 1;

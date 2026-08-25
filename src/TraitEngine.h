@@ -47,4 +47,26 @@ namespace TraitExt
     {
         void ProcessINI(CCINIClass* pINI);
     }
+
+    // ---- Per-instance random (TraitsRandomScope=Instance) -------------------
+    // Type scope resolves once at load and every unit of the type shares the
+    // draw for the whole match. Instance scope defers the draw to each unit's
+    // first logic tick, so units of the same type differ from one another.
+    //
+    // Only INSTANCE-level fields can vary this way (Health, Veterancy, Ammo) —
+    // Image/Cost/Armor live on the shared TechnoTypeClass and are therefore
+    // Type-scope only. The engine warns rather than silently doing nothing.
+    struct InstancePool
+    {
+        std::vector<const TraitDef*> Traits;
+        int CountMin = 1;
+        int CountMax = 1;
+    };
+
+    namespace InstanceRandom
+    {
+        // Registered at load; looked up by TechnoType ID at runtime.
+        const InstancePool* Find(const char* typeID);
+        bool Any();
+    }
 }
