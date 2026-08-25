@@ -433,9 +433,28 @@ namespace TraitExt
         // per-match salt that is identical on every client, so it gives real
         // per-match variety while staying sync-safe — but only once a scenario
         // exists. Log what is actually available so the timing is provable.
-        const ScenarioClass* pScen = ScenarioClass::Instance;
-        const int uniqueID = pScen ? pScen->UniqueID : 0;
-        Debug::Log("[TraitExt] seed context: Scenario=%p UniqueID=%d\n", pScen, uniqueID);
+        ScenarioClass* pScen = ScenarioClass::Instance;
+
+        // Per-match seed source. UniqueID turned out not to vary usefully, so
+        // prefer the STATE of ScenarioClass::Random — the synced in-match RNG,
+        // seeded from the game seed (spawn.ini "Seed="), hence identical on every
+        // client and different every match. We only READ its state; drawing from
+        // it would consume the synced stream and shift vanilla randomness.
+        std::uint32_t matchSalt = 0;
+        if (pScen)
+        {
+            matchSalt = static_cast<std::uint32_t>(pScen->Random.Next1)
+                ^ (static_cast<std::uint32_t>(pScen->Random.Next2) << 1)
+                ^ static_cast<std::uint32_t>(pScen->Random.Table[0])
+                ^ (static_cast<std::uint32_t>(pScen->Random.Table[1]) << 3)
+                ^ static_cast<std::uint32_t>(pScen->UniqueID);
+        }
+        Debug::Log("[TraitExt] seed context: Scenario=%p UniqueID=%d rngState=%08X %08X %08X -> salt=%08X\n",
+            pScen, pScen ? pScen->UniqueID : 0,
+            pScen ? static_cast<unsigned>(pScen->Random.Next1) : 0u,
+            pScen ? static_cast<unsigned>(pScen->Random.Next2) : 0u,
+            pScen ? static_cast<unsigned>(pScen->Random.Table[0]) : 0u,
+            matchSalt);
 
         std::uint32_t globalSeed = 0x5EED1234u;
         bool seedFromScenario = false;
@@ -446,15 +465,15 @@ namespace TraitExt
             {
                 globalSeed = static_cast<std::uint32_t>(static_cast<long long>(parsed));
             }
-            else if (pScen && uniqueID != 0)
+            else if (matchSalt != 0)
             {
                 // RandomSeed=0 (or absent) => per-match seed when one exists.
-                globalSeed = static_cast<std::uint32_t>(uniqueID);
+                globalSeed = matchSalt;
                 seedFromScenario = true;
             }
         }
         Debug::Log("[TraitExt] using seed %u (%s)\n", globalSeed,
-            seedFromScenario ? "per-match, from Scenario UniqueID" : "fixed from RandomSeed");
+            seedFromScenario ? "per-match, from Scenario RNG state" : "fixed from RandomSeed");
 
         // ---- 2. Targets ---------------------------------------------------
         // Default scope is the four TechnoType lists; [TraitExt] TargetLists=
