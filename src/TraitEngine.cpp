@@ -3,7 +3,10 @@
 #include <Phobos.h>
 #include <CCINIClass.h>
 #include <ScenarioClass.h>
+#include <SessionClass.h>
 #include <Utilities/Debug.h>
+
+#include <ctime>
 
 #include <cstdio>
 #include <cstdlib>
@@ -472,18 +475,40 @@ namespace TraitExt
         // seeded from the game seed (spawn.ini "Seed="), hence identical on every
         // client and different every match. We only READ its state; drawing from
         // it would consume the synced stream and shift vanilla randomness.
+        // Seed policy hinges on whether the match must stay in lockstep:
+        //
+        //  * MULTIPLAYER  -> spawn.ini "Seed=" only. The CnCNet client rewrites
+        //    it per game and every client gets the same value, so all clients
+        //    draw identically. Anything machine-local here would desync.
+        //  * SKIRMISH / CAMPAIGN -> no lockstep requirement at all, so mix in a
+        //    local clock. This is what finally makes the draw vary per match:
+        //    spawn.ini is only rewritten when the CnCNet client launches the
+        //    game, so on a direct launch its Seed is constant (observed
+        //    identical across matches), and ScenarioClass::Random is not seeded
+        //    this early either.
         const std::uint32_t spawnSeed = ReadSpawnSeed();
+        const bool isMP = SessionClass::IsMultiplayer();
+
         std::uint32_t matchSalt = spawnSeed;
-        const char* saltSource = "spawn.ini Seed";
+        const char* saltSource = "spawn.ini Seed (MP: identical on all clients)";
+
+        if (!isMP)
+        {
+            const std::uint32_t localEntropy =
+                static_cast<std::uint32_t>(GetTickCount())
+                ^ (static_cast<std::uint32_t>(std::time(nullptr)) << 1);
+            matchSalt = spawnSeed ^ localEntropy;
+            saltSource = "spawn.ini Seed ^ local clock (offline: no sync needed)";
+        }
+
         if (matchSalt == 0 && pScen)
         {
-            // Fallback for non-spawner launches. Known-weak: verified constant
-            // across matches at this point in the load, so it will NOT vary.
             matchSalt = static_cast<std::uint32_t>(pScen->UniqueID);
-            saltSource = "Scenario UniqueID (fallback, may not vary)";
+            saltSource = "Scenario UniqueID (last-resort fallback, may not vary)";
         }
-        Debug::Log("[TraitExt] seed context: spawnSeed=%u UniqueID=%d -> salt=%08X (%s)\n",
-            spawnSeed, pScen ? pScen->UniqueID : 0, matchSalt, saltSource);
+
+        Debug::Log("[TraitExt] seed context: MP=%d spawnSeed=%u UniqueID=%d -> salt=%08X (%s)\n",
+            isMP ? 1 : 0, spawnSeed, pScen ? pScen->UniqueID : 0, matchSalt, saltSource);
 
         std::uint32_t globalSeed = 0x5EED1234u;
         bool seedFromScenario = false;
