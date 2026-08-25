@@ -799,5 +799,24 @@ namespace TraitExt
 
         Debug::Log("[TraitExt] applied traits to %d target(s) from %d trait definition(s)\n",
             appliedTargets, static_cast<int>(traits.size()));
+
+        // Image= cycle check. A -> B while B -> A makes the engine fail to
+        // resolve art: the unit renders as nothing and the sidebar shows a
+        // garbage cameo, with no indication of why. Traits make this easy to
+        // create accidentally across two independent random pools, so name it.
+        for (const auto& target : targets)
+        {
+            const std::string img = ReadKey(pINI, target.c_str(), "Image");
+            if (img.empty() || img == target)
+                continue;
+            const std::string back = ReadKey(pINI, img.c_str(), "Image");
+            if (!back.empty() && back == target)
+            {
+                Debug::Log("[TraitExt] WARN circular Image: [%s] Image=%s and [%s] Image=%s "
+                    "— the engine cannot resolve this; expect an invisible unit and a wrong "
+                    "cameo. Break the cycle so at most one side redirects.\n",
+                    target.c_str(), img.c_str(), img.c_str(), back.c_str());
+            }
+        }
     }
 }
