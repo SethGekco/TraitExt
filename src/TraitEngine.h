@@ -30,6 +30,9 @@ namespace TraitExt
         // Traits this trait is composed of; expanded before its own entries so
         // the trait's own keys act as the more specific override.
         std::vector<std::string> Composes;
+        // Inverse assignment: the trait names its own targets, so a trait can be
+        // applied without editing the target section at all.
+        std::vector<std::string> AppliesTo;
         // Author order is preserved: fold order is declaration order.
         std::vector<std::pair<std::string, std::string>> Entries;
         // Per-key mode overrides from "<Key>.Merge=" inside the trait section.

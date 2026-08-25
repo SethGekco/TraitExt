@@ -166,6 +166,37 @@ namespace TraitExt
         // splitmix32 finalizer — decorrelates nearby seeds. Matters because
         // per-match seeds (Scenario UniqueID) can be close together, and raw
         // xorshift32 on adjacent seeds produces visibly correlated first draws.
+        // The CnCNet spawner rewrites spawn.ini per match with a Seed= that is
+        // identical on every client — the one true per-match synced value that
+        // already exists at rules-load time. (ScenarioClass::Random is NOT yet
+        // seeded this early: its state was byte-identical across matches.)
+        std::uint32_t ReadSpawnSeed()
+        {
+            FILE* fp = std::fopen("spawn.ini", "r");
+            if (!fp)
+                return 0;
+
+            std::uint32_t seed = 0;
+            char line[256];
+            while (std::fgets(line, sizeof(line), fp))
+            {
+                const char* p = line;
+                while (*p && static_cast<unsigned char>(*p) <= ' ')
+                    ++p;
+                if (std::strncmp(p, "Seed", 4) != 0)
+                    continue;
+                p += 4;
+                while (*p && static_cast<unsigned char>(*p) <= ' ')
+                    ++p;
+                if (*p != '=')
+                    continue;
+                seed = static_cast<std::uint32_t>(std::strtoul(p + 1, nullptr, 10));
+                break;
+            }
+            std::fclose(fp);
+            return seed;
+        }
+
         std::uint32_t MixSeed(std::uint32_t x)
         {
             x += 0x9E3779B9u;
@@ -395,6 +426,7 @@ namespace TraitExt
                 MergeMode::Override);
 
             def.Composes = SplitCSV(ReadKey(pINI, name.c_str(), "Traits"));
+            def.AppliesTo = SplitCSV(ReadKey(pINI, name.c_str(), "AppliesTo"));
 
             const int keyCount = pINI->GetKeyCount(name.c_str());
             for (int i = 0; i < keyCount; ++i)
@@ -440,21 +472,18 @@ namespace TraitExt
         // seeded from the game seed (spawn.ini "Seed="), hence identical on every
         // client and different every match. We only READ its state; drawing from
         // it would consume the synced stream and shift vanilla randomness.
-        std::uint32_t matchSalt = 0;
-        if (pScen)
+        const std::uint32_t spawnSeed = ReadSpawnSeed();
+        std::uint32_t matchSalt = spawnSeed;
+        const char* saltSource = "spawn.ini Seed";
+        if (matchSalt == 0 && pScen)
         {
-            matchSalt = static_cast<std::uint32_t>(pScen->Random.Next1)
-                ^ (static_cast<std::uint32_t>(pScen->Random.Next2) << 1)
-                ^ static_cast<std::uint32_t>(pScen->Random.Table[0])
-                ^ (static_cast<std::uint32_t>(pScen->Random.Table[1]) << 3)
-                ^ static_cast<std::uint32_t>(pScen->UniqueID);
+            // Fallback for non-spawner launches. Known-weak: verified constant
+            // across matches at this point in the load, so it will NOT vary.
+            matchSalt = static_cast<std::uint32_t>(pScen->UniqueID);
+            saltSource = "Scenario UniqueID (fallback, may not vary)";
         }
-        Debug::Log("[TraitExt] seed context: Scenario=%p UniqueID=%d rngState=%08X %08X %08X -> salt=%08X\n",
-            pScen, pScen ? pScen->UniqueID : 0,
-            pScen ? static_cast<unsigned>(pScen->Random.Next1) : 0u,
-            pScen ? static_cast<unsigned>(pScen->Random.Next2) : 0u,
-            pScen ? static_cast<unsigned>(pScen->Random.Table[0]) : 0u,
-            matchSalt);
+        Debug::Log("[TraitExt] seed context: spawnSeed=%u UniqueID=%d -> salt=%08X (%s)\n",
+            spawnSeed, pScen ? pScen->UniqueID : 0, matchSalt, saltSource);
 
         std::uint32_t globalSeed = 0x5EED1234u;
         bool seedFromScenario = false;
@@ -473,7 +502,7 @@ namespace TraitExt
             }
         }
         Debug::Log("[TraitExt] using seed %u (%s)\n", globalSeed,
-            seedFromScenario ? "per-match, from Scenario RNG state" : "fixed from RandomSeed");
+            seedFromScenario ? "per-match" : "fixed from RandomSeed");
 
         // ---- 2. Targets ---------------------------------------------------
         // Default scope is the four TechnoType lists; [TraitExt] TargetLists=
@@ -506,6 +535,25 @@ namespace TraitExt
                 continue;
 
             std::vector<std::string> wanted = SplitCSV(ReadKey(pINI, target.c_str(), "Traits"));
+
+            // Inverse assignment: traits that name this target via AppliesTo=.
+            // Applied before the target's own Traits= so the target-side list
+            // stays the more specific (later-folding) one.
+            {
+                std::vector<std::string> inverse;
+                for (const auto& kv : traits)
+                {
+                    const TraitDef& def = kv.second;
+                    if (std::find(def.AppliesTo.begin(), def.AppliesTo.end(), target)
+                        != def.AppliesTo.end())
+                    {
+                        inverse.push_back(def.Name);
+                    }
+                }
+                // Deterministic order — the map iteration order is not stable.
+                std::sort(inverse.begin(), inverse.end());
+                wanted.insert(wanted.begin(), inverse.begin(), inverse.end());
+            }
 
             // ---- 3. Random pool (deterministic; identical on every client) --
             // "TraitsRandomPool" is the clearer name (it sits next to
