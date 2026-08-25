@@ -451,6 +451,7 @@ namespace TraitExt
 
             TraitDef def;
             def.Name = name;
+            def.Order = static_cast<int>(traits.size());
             def.Mode = ParseMode(ReadKey(pINI, name.c_str(), "Merge", "Override"),
                 MergeMode::Override);
 
@@ -461,7 +462,13 @@ namespace TraitExt
             for (int i = 0; i < keyCount; ++i)
             {
                 const char* keyName = pINI->GetKeyName(name.c_str(), i);
-                if (!keyName || !std::strcmp(keyName, "Merge") || !std::strcmp(keyName, "Traits"))
+                // Reserved metadata keys — these configure the trait, they are
+                // NOT values to fold into targets. Missing one here leaks it
+                // into every target section (e.g. "E1.AppliesTo -> E1,GGI").
+                if (!keyName
+                    || !std::strcmp(keyName, "Merge")
+                    || !std::strcmp(keyName, "Traits")
+                    || !std::strcmp(keyName, "AppliesTo"))
                     continue;
                 if (keyName[0] == '$')
                     continue; // leave $Inherits and friends to Phobos
@@ -591,19 +598,23 @@ namespace TraitExt
             // Applied before the target's own Traits= so the target-side list
             // stays the more specific (later-folding) one.
             {
-                std::vector<std::string> inverse;
+                std::vector<std::pair<int, std::string>> inverse;
                 for (const auto& kv : traits)
                 {
                     const TraitDef& def = kv.second;
                     if (std::find(def.AppliesTo.begin(), def.AppliesTo.end(), target)
                         != def.AppliesTo.end())
                     {
-                        inverse.push_back(def.Name);
+                        inverse.emplace_back(def.Order, def.Name);
                     }
                 }
-                // Deterministic order — the map iteration order is not stable.
+                // Fold in [TraitTypes] declaration order. Sorting by NAME instead
+                // silently reorders the fold and changes results: with
+                // T_Absolute(=500) and T_Beefy(+200), alphabetical put Override
+                // first and yielded 700 instead of the intended 500.
                 std::sort(inverse.begin(), inverse.end());
-                wanted.insert(wanted.begin(), inverse.begin(), inverse.end());
+                for (auto it = inverse.rbegin(); it != inverse.rend(); ++it)
+                    wanted.insert(wanted.begin(), it->second);
             }
 
             // ---- 3. Random pool (deterministic; identical on every client) --

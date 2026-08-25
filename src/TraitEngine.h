@@ -26,6 +26,10 @@ namespace TraitExt
     struct TraitDef
     {
         std::string Name;
+        // Index in [TraitTypes]. Inverse (AppliesTo=) assignment folds in this
+        // order — declaration order is meaningful to the author, alphabetical
+        // order is not, and fold order changes the result.
+        int Order = 0;
         MergeMode Mode = MergeMode::Override;
         // Traits this trait is composed of; expanded before its own entries so
         // the trait's own keys act as the more specific override.
