@@ -24,6 +24,7 @@
 #include <Utilities/Macro.h>
 #include <TechnoClass.h>
 #include <TechnoTypeClass.h>
+#include <FootClass.h>          // generic_cast in TechnoClass.h needs it complete
 #include <ScenarioClass.h>
 
 #include <unordered_set>
