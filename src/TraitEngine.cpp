@@ -61,9 +61,16 @@ namespace TraitExt
                 // an explicit Cameo= in that art section, else the <art>ICON
                 // filename convention.
                 char buffer[0x40];
-                CCINIClass::INI_Art->ReadString(kv.second.c_str(), "Cameo", "", buffer, sizeof(buffer));
+                // INI_Art is a CCINIClass by value, not a pointer.
+                CCINIClass::INI_Art.ReadString(kv.second.c_str(), "Cameo", "", buffer, sizeof(buffer));
 
-                std::string cameo = Trim(std::string(buffer));
+                std::string cameo(buffer);
+                while (!cameo.empty() && static_cast<unsigned char>(cameo.back()) <= ' ')
+                    cameo.pop_back();
+                size_t lead = 0;
+                while (lead < cameo.size() && static_cast<unsigned char>(cameo[lead]) <= ' ')
+                    ++lead;
+                cameo = cameo.substr(lead);
                 if (cameo.empty())
                     cameo = kv.second + "ICON";
                 if (cameo.size() < 5 || _stricmp(cameo.c_str() + cameo.size() - 4, ".shp") != 0)
