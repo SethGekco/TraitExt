@@ -4,6 +4,9 @@
 #include <CCINIClass.h>
 #include <ScenarioClass.h>
 #include <SessionClass.h>
+#include <TechnoTypeClass.h>
+#include <FootClass.h>          // generic_cast needs it complete
+#include <FileSystem.h>
 #include <Utilities/Debug.h>
 
 #include <ctime>
@@ -25,6 +28,63 @@ namespace TraitExt
         // them for the whole match.
         std::unordered_map<std::string, TraitDef> g_Traits;
         std::unordered_map<std::string, InstancePool> g_InstancePools;
+    }
+
+    namespace
+    {
+        std::vector<std::pair<std::string, std::string>> g_CameoRestore;
+        bool g_CameoFixEnabled = true;
+    }
+
+    namespace CameoFix
+    {
+        void Remember(const std::string& targetID, const std::string& originalArt)
+        {
+            g_CameoRestore.emplace_back(targetID, originalArt);
+        }
+
+        bool Enabled() { return g_CameoFixEnabled; }
+        void SetEnabled(bool on) { g_CameoFixEnabled = on; }
+
+        void Apply()
+        {
+            if (!g_CameoFixEnabled || g_CameoRestore.empty())
+                return;
+
+            for (const auto& kv : g_CameoRestore)
+            {
+                TechnoTypeClass* const pType = TechnoTypeClass::Find(kv.first.c_str());
+                if (!pType)
+                    continue;
+
+                // Resolve the cameo the ORIGINAL art section would have used:
+                // an explicit Cameo= in that art section, else the <art>ICON
+                // filename convention.
+                char buffer[0x40];
+                CCINIClass::INI_Art->ReadString(kv.second.c_str(), "Cameo", "", buffer, sizeof(buffer));
+
+                std::string cameo = Trim(std::string(buffer));
+                if (cameo.empty())
+                    cameo = kv.second + "ICON";
+                if (cameo.size() < 5 || _stricmp(cameo.c_str() + cameo.size() - 4, ".shp") != 0)
+                    cameo += ".shp";
+
+                if (SHPStruct* const pSHP = FileSystem::LoadSHPFile(cameo.c_str()))
+                {
+                    std::strncpy(pType->CameoFile, cameo.c_str(), sizeof(pType->CameoFile) - 1);
+                    pType->CameoFile[sizeof(pType->CameoFile) - 1] = '\0';
+                    pType->Cameo = pSHP;
+                    Debug::Log("[TraitExt] cameo kept for %s: '%s' (original art '%s')\n",
+                        kv.first.c_str(), cameo.c_str(), kv.second.c_str());
+                }
+                else
+                {
+                    Debug::Log("[TraitExt] WARN cameo '%s' for %s failed to load; "
+                        "sidebar will show the redirected art's cameo instead\n",
+                        cameo.c_str(), kv.first.c_str());
+                }
+            }
+        }
     }
 
     namespace InstanceRandom
@@ -439,6 +499,10 @@ namespace TraitExt
 
         g_Traits.clear();
         g_InstancePools.clear();
+        g_CameoRestore.clear();
+        // Default ON: a random-art trait almost never wants the cameo to follow.
+        g_CameoFixEnabled = ReadKey(pINI, SectConfig, "KeepOriginalCameo", "yes")[0] != 'n'
+            && ReadKey(pINI, SectConfig, "KeepOriginalCameo", "yes")[0] != 'N';
         std::unordered_map<std::string, TraitDef>& traits = g_Traits;
         for (const auto& name : traitNames)
         {
@@ -792,6 +856,12 @@ namespace TraitExt
                 pINI->WriteString(target.c_str(), key.c_str(), result.c_str());
                 Debug::Log("[TraitExt]   %s.%s: '%s' -> '%s'\n",
                     target.c_str(), key.c_str(), base.c_str(), result.c_str());
+
+                // A changed Image also moves the cameo, since the cameo is read
+                // from the art section ImageFile names. Remember the art section
+                // in use beforehand so the cameo can be put back.
+                if (!_stricmp(key.c_str(), "Image"))
+                    CameoFix::Remember(target, base.empty() ? target : base);
             }
 
             ++appliedTargets;

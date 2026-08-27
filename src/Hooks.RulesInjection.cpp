@@ -47,3 +47,13 @@ DEFINE_HOOK(0x668BF0, RulesClass_ReadFile_TraitInjection, 0x5)
 
     return 0;
 }
+
+// 0x679CAF = RulesData::LoadAfterTypeData epilogue (verified: 5F / 5E / B0 01 /
+// 5B is exactly 5 bytes, matching the size all frameworks declare here). Types
+// exist by now, so this is where a cameo clobbered by an Image= redirect can be
+// put back. Cooperative return 0 — Antares and Phobos also sit on this address.
+DEFINE_HOOK(0x679CAF, RulesData_LoadAfterTypeData_TraitCameoFix, 0x5)
+{
+    TraitExt::CameoFix::Apply();
+    return 0;
+}

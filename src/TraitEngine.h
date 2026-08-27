@@ -67,6 +67,22 @@ namespace TraitExt
         int CountMax = 1;
     };
 
+    // ---- Cameo preservation --------------------------------------------
+    // In YR the cameo is read from the art section named by ImageFile (see
+    // Antares Ext/TechnoType/Body.cpp: CameoPCX.Read(&INI_Art, pThis->ImageFile,
+    // ...)). So changing Image= inevitably drags the cameo along with it, which
+    // is almost never what a random-art trait wants. When enabled (the default),
+    // TraitExt restores each affected type's cameo to the one its ORIGINAL art
+    // would have used, after types finish loading.
+    namespace CameoFix
+    {
+        // targetID -> the art section it used before a trait changed Image.
+        void Remember(const std::string& targetID, const std::string& originalArt);
+        void Apply();   // called once types are loaded
+        bool Enabled();
+        void SetEnabled(bool on);
+    }
+
     namespace InstanceRandom
     {
         // Registered at load; looked up by TechnoType ID at runtime.
