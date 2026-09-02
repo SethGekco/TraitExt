@@ -5,6 +5,8 @@
 #include <utility>
 
 class CCINIClass;
+class TechnoClass;   // must be at GLOBAL scope: declaring it inside namespace
+                     // TraitExt would create a distinct TraitExt::TechnoClass
 
 namespace TraitExt
 {
@@ -97,7 +99,7 @@ namespace TraitExt
 
     // Applies instance-capable keys (Health/Strength, Veterancy, Ammo) to one
     // object. Shared by per-instance random and by spy infiltration.
-    void ApplyInstanceTraits(class TechnoClass* pThis,
+    void ApplyInstanceTraits(::TechnoClass* pThis,
         const std::vector<const TraitDef*>& traits, const char* reason);
 
     namespace InstanceRandom

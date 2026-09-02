@@ -160,7 +160,7 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
 // module at all). All four frameworks declare 0x5 here for this reason.
 namespace TraitExt
 {
-    void ApplyInstanceTraits(TechnoClass* pThis,
+    void ApplyInstanceTraits(::TechnoClass* pThis,
         const std::vector<const TraitDef*>& traits, const char* reason)
     {
         if (!pThis)
