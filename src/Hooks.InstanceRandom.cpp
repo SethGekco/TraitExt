@@ -25,6 +25,9 @@
 #include <TechnoClass.h>
 #include <TechnoTypeClass.h>
 #include <FootClass.h>          // generic_cast in TechnoClass.h needs it complete
+#include <BuildingClass.h>
+#include <BuildingTypeClass.h>
+#include <HouseClass.h>
 #include <ScenarioClass.h>
 
 #include <unordered_set>
@@ -47,7 +50,7 @@ namespace
         return true;
     }
 
-    void ApplyInstanceTrait(TechnoClass* pThis, const TraitExt::TraitDef* pDef)
+    void ApplyOneTrait(TechnoClass* pThis, const TraitExt::TraitDef* pDef)
     {
         TechnoTypeClass* const pType = pThis->GetTechnoType();
         if (!pType)
@@ -139,7 +142,7 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
         const TraitExt::TraitDef* pDef = pPool->Traits[idx[i]];
         Debug::Log("[TraitExt] (instance) %s @%p drew '%s'\n",
             pType->ID, pThis, pDef->Name.c_str());
-        ApplyInstanceTrait(pThis, pDef);
+        ApplyOneTrait(pThis, pDef);
     }
 
     return 0;
@@ -155,6 +158,60 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
 // instruction stream and sending execution to a wild address. That is what
 // caused three reproducible C0000005 crashes at 0x09C00126 (an address in no
 // module at all). All four frameworks declare 0x5 here for this reason.
+namespace TraitExt
+{
+    void ApplyInstanceTraits(TechnoClass* pThis,
+        const std::vector<const TraitDef*>& traits, const char* reason)
+    {
+        if (!pThis)
+            return;
+        TechnoTypeClass* const pType = pThis->GetTechnoType();
+        for (const TraitDef* pDef : traits)
+        {
+            Debug::Log("[TraitExt] (%s) %s @%p applying '%s'\n",
+                reason, pType ? pType->ID : "?", pThis, pDef->Name.c_str());
+            ApplyOneTrait(pThis, pDef);
+        }
+    }
+}
+
+// Spy infiltration -> force traits onto the infiltrated BUILDING INSTANCE.
+//
+// ENCYCLOPEDIA-CHECKED (encyclopedia/Spy-Infiltration.md, registry/hooks.csv):
+// 0x4571E0 is BuildingClass::Infiltrate. ECX = the entered BuildingClass*,
+// [ESP+0x4] = the infiltrator's HouseClass*. Antares/Ares wrap the whole
+// function and return 0x4575A2 when their dispatch consumes the event; Syringe
+// still runs every registered handler, so an observer here is live regardless
+// of load order. Three other consumers already sit on this address (Antares,
+// IntelExt, AcademyExt).
+//
+//   *** THIS HANDLER MUST ALWAYS RETURN 0. ***
+//
+// Returning a jump target would contend with Antares for control of the site
+// and let load order decide whose spy effects run at all. Stolen size is 0x5,
+// matching every other consumer — a different size at a shared address can
+// overlap a neighbouring patch and corrupt its JMP displacement.
+//
+// Only instance-level keys are applied, so buildability is untouched and the
+// sidebar repaint the page warns about is not required here.
+DEFINE_HOOK(0x4571E0, BuildingClass_Infiltrate_TraitExt, 0x5)
+{
+    GET(BuildingClass*, pVictim, ECX);
+    GET_STACK(HouseClass*, pEnterer, 0x4);
+
+    if (!pVictim || !pEnterer || !TraitExt::SpyTraits::Any())
+        return 0;
+
+    BuildingTypeClass* const pType = pVictim->Type;
+    if (!pType)
+        return 0;
+
+    if (const auto* pList = TraitExt::SpyTraits::Find(pType->ID))
+        TraitExt::ApplyInstanceTraits(pVictim, *pList, "spy");
+
+    return 0;
+}
+
 DEFINE_HOOK(0x6F4500, TechnoClass_DTOR_InstanceRandom, 0x5)
 {
     GET(TechnoClass*, pThis, ECX);

@@ -83,6 +83,23 @@ namespace TraitExt
         void SetEnabled(bool on);
     }
 
+    // ---- Spy-triggered traits (forced inheritance on infiltration) ---------
+    // A building type may declare SpyTraits=; when a spy infiltrates one of
+    // those buildings, the traits are forced onto THAT BUILDING INSTANCE.
+    // Instance scope is deliberate: BuildingTypeClass is shared by every house,
+    // so type-level application would buff the victim's whole faction (and
+    // everyone else's) rather than the infiltrated structure.
+    namespace SpyTraits
+    {
+        const std::vector<const TraitDef*>* Find(const char* buildingTypeID);
+        bool Any();
+    }
+
+    // Applies instance-capable keys (Health/Strength, Veterancy, Ammo) to one
+    // object. Shared by per-instance random and by spy infiltration.
+    void ApplyInstanceTraits(class TechnoClass* pThis,
+        const std::vector<const TraitDef*>& traits, const char* reason);
+
     namespace InstanceRandom
     {
         // Registered at load; looked up by TechnoType ID at runtime.

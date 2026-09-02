@@ -94,6 +94,24 @@ namespace TraitExt
         }
     }
 
+    namespace
+    {
+        std::unordered_map<std::string, std::vector<const TraitDef*>> g_SpyTraits;
+    }
+
+    namespace SpyTraits
+    {
+        const std::vector<const TraitDef*>* Find(const char* buildingTypeID)
+        {
+            if (!buildingTypeID || g_SpyTraits.empty())
+                return nullptr;
+            const auto it = g_SpyTraits.find(buildingTypeID);
+            return (it == g_SpyTraits.end()) ? nullptr : &it->second;
+        }
+
+        bool Any() { return !g_SpyTraits.empty(); }
+    }
+
     namespace InstanceRandom
     {
         const InstancePool* Find(const char* typeID)
@@ -506,6 +524,7 @@ namespace TraitExt
 
         g_Traits.clear();
         g_InstancePools.clear();
+        g_SpyTraits.clear();
         g_CameoRestore.clear();
         // Default ON: a random-art trait almost never wants the cameo to follow.
         g_CameoFixEnabled = ReadKey(pINI, SectConfig, "KeepOriginalCameo", "yes")[0] != 'n'
@@ -662,6 +681,33 @@ namespace TraitExt
         {
             if (!pINI->GetSection(target.c_str()))
                 continue;
+
+            // Spy-triggered traits: registered now, forced on at infiltration.
+            {
+                const std::vector<std::string> spy =
+                    SplitCSV(ReadKey(pINI, target.c_str(), "SpyTraits"));
+                if (!spy.empty())
+                {
+                    std::vector<const TraitDef*> defs;
+                    for (const auto& n : spy)
+                    {
+                        const auto it = traits.find(n);
+                        if (it == traits.end())
+                        {
+                            Debug::Log("[TraitExt] WARN %s: unknown SpyTraits entry '%s'\n",
+                                target.c_str(), n.c_str());
+                            continue;
+                        }
+                        defs.push_back(&it->second);
+                    }
+                    if (!defs.empty())
+                    {
+                        g_SpyTraits[target] = defs;
+                        Debug::Log("[TraitExt] %s: registered %d spy trait(s)\n",
+                            target.c_str(), static_cast<int>(defs.size()));
+                    }
+                }
+            }
 
             std::vector<std::string> wanted = SplitCSV(ReadKey(pINI, target.c_str(), "Traits"));
 
