@@ -34,6 +34,7 @@ namespace TraitExt
     {
         std::vector<std::pair<std::string, std::string>> g_CameoRestore;
         bool g_CameoFixEnabled = true;
+        bool g_CameoApplied = false;
     }
 
     namespace CameoFix
@@ -50,6 +51,14 @@ namespace TraitExt
         {
             if (!g_CameoFixEnabled || g_CameoRestore.empty())
                 return;
+
+            // 0x679CAF fires once per rules pass, so without this guard the
+            // whole restore re-runs several times per game start, reloading and
+            // leaking an SHP for every affected type each time. Reset by
+            // ProcessINI so a later match still gets its cameos restored.
+            if (g_CameoApplied)
+                return;
+            g_CameoApplied = true;
 
             for (const auto& kv : g_CameoRestore)
             {
@@ -526,6 +535,7 @@ namespace TraitExt
         g_InstancePools.clear();
         g_SpyTraits.clear();
         g_CameoRestore.clear();
+        g_CameoApplied = false;
         // Default ON: a random-art trait almost never wants the cameo to follow.
         g_CameoFixEnabled = ReadKey(pINI, SectConfig, "KeepOriginalCameo", "yes")[0] != 'n'
             && ReadKey(pINI, SectConfig, "KeepOriginalCameo", "yes")[0] != 'N';
