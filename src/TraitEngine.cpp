@@ -547,6 +547,8 @@ namespace TraitExt
 
             def.Composes = SplitCSV(ReadKey(pINI, name.c_str(), "Traits"));
             def.AppliesTo = SplitCSV(ReadKey(pINI, name.c_str(), "AppliesTo"));
+            def.RandomPoolFor = SplitCSV(ReadKey(pINI, name.c_str(), "RandomPoolFor"));
+            def.RandomScope = ReadKey(pINI, name.c_str(), "RandomScope");
 
             const int keyCount = pINI->GetKeyCount(name.c_str());
             for (int i = 0; i < keyCount; ++i)
@@ -558,7 +560,9 @@ namespace TraitExt
                 if (!keyName
                     || !std::strcmp(keyName, "Merge")
                     || !std::strcmp(keyName, "Traits")
-                    || !std::strcmp(keyName, "AppliesTo"))
+                    || !std::strcmp(keyName, "AppliesTo")
+                    || !std::strcmp(keyName, "RandomPoolFor")
+                    || !std::strcmp(keyName, "RandomScope"))
                     continue;
                 if (keyName[0] == '$')
                     continue; // leave $Inherits and friends to Phobos
@@ -741,6 +745,39 @@ namespace TraitExt
             std::string poolStr = ReadKey(pINI, target.c_str(), "TraitsRandomPool");
             if (poolStr.empty())
                 poolStr = ReadKey(pINI, target.c_str(), "TraitsRandom");
+
+            // Merge in traits that nominated themselves via RandomPoolFor=,
+            // in [TraitTypes] declaration order so the pool is stable.
+            std::string inverseScope;
+            {
+                std::vector<std::pair<int, std::string>> joined;
+                for (const auto& kv : traits)
+                {
+                    const TraitDef& def = kv.second;
+                    if (std::find(def.RandomPoolFor.begin(), def.RandomPoolFor.end(), target)
+                        == def.RandomPoolFor.end())
+                        continue;
+                    joined.emplace_back(def.Order, def.Name);
+                    if (!def.RandomScope.empty())
+                    {
+                        if (inverseScope.empty())
+                            inverseScope = def.RandomScope;
+                        else if (_stricmp(inverseScope.c_str(), def.RandomScope.c_str()) != 0)
+                        {
+                            Debug::Log("[TraitExt] WARN %s: conflicting RandomScope in pool "
+                                "('%s' vs '%s'); using '%s'\n", target.c_str(),
+                                inverseScope.c_str(), def.RandomScope.c_str(), inverseScope.c_str());
+                        }
+                    }
+                }
+                std::sort(joined.begin(), joined.end());
+                for (const auto& j : joined)
+                {
+                    if (!poolStr.empty())
+                        poolStr += ',';
+                    poolStr += j.second;
+                }
+            }
             if (!poolStr.empty())
             {
                 std::vector<std::string> pool = SplitCSV(poolStr);
@@ -748,7 +785,11 @@ namespace TraitExt
                 // Scope toggle. Type (default) = one draw at load shared by the
                 // whole type for the match. Instance = each unit draws its own
                 // at runtime.
-                const std::string scope = ReadKey(pINI, target.c_str(), "TraitsRandomScope", "Type");
+                std::string scope = ReadKey(pINI, target.c_str(), "TraitsRandomScope", "");
+                if (scope.empty())
+                    scope = inverseScope;      // trait-side RandomScope=
+                if (scope.empty())
+                    scope = "Type";            // default
                 const bool perInstance =
                     (!scope.empty() && (scope[0] == 'I' || scope[0] == 'i'));
 

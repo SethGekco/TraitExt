@@ -39,6 +39,12 @@ namespace TraitExt
         // Inverse assignment: the trait names its own targets, so a trait can be
         // applied without editing the target section at all.
         std::vector<std::string> AppliesTo;
+        // Inverse random-pool membership: "this trait is one option in these
+        // targets' random pools". Same motivation as AppliesTo — keeps all
+        // trait config in one place instead of scattered across unit sections.
+        std::vector<std::string> RandomPoolFor;
+        // Optional scope for the pools this trait joins ("Type" or "Instance").
+        std::string RandomScope;
         // Author order is preserved: fold order is declaration order.
         std::vector<std::pair<std::string, std::string>> Entries;
         // Per-key mode overrides from "<Key>.Merge=" inside the trait section.
