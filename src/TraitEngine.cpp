@@ -954,7 +954,31 @@ namespace TraitExt
             for (const auto& key : keyOrder)
             {
                 const std::string base = ReadKey(pINI, target.c_str(), key.c_str());
-                const std::string result = FoldKey(base, byKey[key], target.c_str(), key.c_str());
+                std::string result = FoldKey(base, byKey[key], target.c_str(), key.c_str());
+
+                // Image= must name an ART SECTION, not a unit ID. Many units
+                // redirect their own art (MGTK -> RTNK, APOC -> MTNK), so a
+                // trait saying Image=MGTK would point at a section that does not
+                // exist and the unit renders as nothing with no cameo. Follow
+                // the redirect so "look like a Mirage Tank" does what it says.
+                if (!_stricmp(key.c_str(), "Image") && !result.empty())
+                {
+                    std::string art = result;
+                    for (int hops = 0; hops < 8; ++hops)
+                    {
+                        const std::string next = ReadKey(pINI, art.c_str(), "Image");
+                        if (next.empty() || next == art)
+                            break;
+                        art = next;
+                    }
+                    if (art != result)
+                    {
+                        Debug::Log("[TraitExt]   %s.Image '%s' redirects its own art -> using '%s'\n",
+                            target.c_str(), result.c_str(), art.c_str());
+                        result = art;
+                    }
+                }
+
                 if (result == base)
                     continue;
                 pINI->WriteString(target.c_str(), key.c_str(), result.c_str());
