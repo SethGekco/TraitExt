@@ -41,6 +41,10 @@ namespace
 {
     std::unordered_set<void*> g_Seen;
 
+    // Defined further down with the variant-art state; declared here because
+    // the logic-tick hook below is the safety net that undoes a draw swap.
+    void RestorePending();
+
     bool ParseDouble(const char* s, double& out)
     {
         if (!s || !*s)
