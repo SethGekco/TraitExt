@@ -536,6 +536,9 @@ namespace TraitExt
         g_SpyTraits.clear();
         g_CameoRestore.clear();
         g_CameoApplied = false;
+        // Kill switch: the draw-time Type swap is the riskiest thing here, so
+        // it can be disabled from INI without a rebuild.
+        VariantArt::SetEnabled(ReadKey(pINI, SectConfig, "VariantArt", "yes")[0] != 'n');
         // Default ON: a random-art trait almost never wants the cameo to follow.
         g_CameoFixEnabled = ReadKey(pINI, SectConfig, "KeepOriginalCameo", "yes")[0] != 'n'
             && ReadKey(pINI, SectConfig, "KeepOriginalCameo", "yes")[0] != 'N';
@@ -681,8 +684,19 @@ namespace TraitExt
                 listSections.push_back(extra);
         }
 
+        // Remember which list each target came from, so a synthesised variant
+        // type can be registered in that same list (or it never loads).
+        std::unordered_map<std::string, std::string> targetList;
         for (const auto& list : listSections)
-            ReadListSection(pINI, list.c_str(), targets);
+        {
+            std::vector<std::string> got;
+            ReadListSection(pINI, list.c_str(), got);
+            for (const auto& g : got)
+            {
+                targets.push_back(g);
+                targetList.emplace(g, list);
+            }
+        }
 
         ReadListSection(pINI, "TraitTargets", targets);
 
@@ -813,6 +827,7 @@ namespace TraitExt
                     ip.CountMax = ip.CountMin;
                     if (cp.size() >= 2 && ParseNumber(cp[1], tmp)) ip.CountMax = static_cast<int>(tmp);
 
+                    int cloneIdx = 0;
                     for (const auto& n : pool)
                     {
                         const auto it = traits.find(n);
@@ -823,6 +838,46 @@ namespace TraitExt
                             continue;
                         }
                         ip.Traits.push_back(&it->second);
+
+                        // If this trait sets Image, synthesise a clone type so
+                        // the look really can differ per unit. The clone
+                        // $Inherits the target, so it matches in every other
+                        // respect, and is registered in the same type list.
+                        std::string cloneID;
+                        for (const auto& e : it->second.Entries)
+                        {
+                            if (_stricmp(e.first.c_str(), "Image") != 0)
+                                continue;
+
+                            std::string art = e.second;
+                            for (int hops = 0; hops < 8; ++hops)
+                            {
+                                const std::string nx = ReadKey(pINI, art.c_str(), "Image");
+                                if (nx.empty() || nx == art) break;
+                                art = nx;
+                            }
+
+                            char buf[24];
+                            std::snprintf(buf, sizeof(buf), "%.16s$%d", target.c_str(), cloneIdx++);
+                            cloneID = buf;
+
+                            pINI->WriteString(cloneID.c_str(), "$Inherits", target.c_str());
+                            pINI->WriteString(cloneID.c_str(), "Image", art.c_str());
+
+                            const auto lit = targetList.find(target);
+                            if (lit != targetList.end())
+                            {
+                                const int n2 = pINI->GetKeyCount(lit->second.c_str());
+                                char idx[16];
+                                std::snprintf(idx, sizeof(idx), "%d", n2);
+                                pINI->WriteString(lit->second.c_str(), idx, cloneID.c_str());
+                            }
+
+                            Debug::Log("[TraitExt] %s: variant type '%s' (Image=%s) for trait '%s'\n",
+                                target.c_str(), cloneID.c_str(), art.c_str(), n.c_str());
+                            break;
+                        }
+                        ip.CloneIDs.push_back(cloneID);
                     }
 
                     if (!ip.Traits.empty())

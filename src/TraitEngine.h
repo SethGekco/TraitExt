@@ -71,9 +71,27 @@ namespace TraitExt
     struct InstancePool
     {
         std::vector<const TraitDef*> Traits;
+        // Parallel to Traits. Image is TYPE-level, so a per-unit look needs a
+        // real second type: for any pooled trait that sets Image we synthesise
+        // a clone type ($Inherits the target, differing only in Image) and swap
+        // the unit's Type pointer for the duration of its draw. Empty when the
+        // trait sets no Image.
+        std::vector<std::string> CloneIDs;
         int CountMin = 1;
         int CountMax = 1;
     };
+
+    // Per-unit cosmetic variant art. Rendering only: the Type pointer is swapped
+    // just around UnitClass::DrawObject and restored, so house counts, build
+    // limits and prerequisites never observe the clone.
+    namespace VariantArt
+    {
+        void Assign(::TechnoClass* pThis, const char* cloneID);
+        void Forget(::TechnoClass* pThis);
+        bool Enabled();
+        void SetEnabled(bool on);
+        bool Any();
+    }
 
     // ---- Cameo preservation --------------------------------------------
     // In YR the cameo is read from the art section named by ImageFile (see

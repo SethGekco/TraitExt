@@ -28,6 +28,9 @@
 #include <BuildingClass.h>
 #include <BuildingTypeClass.h>
 #include <HouseClass.h>
+#include <UnitClass.h>
+#include <UnitTypeClass.h>
+#include <unordered_map>
 #include <ScenarioClass.h>
 
 #include <unordered_set>
@@ -86,13 +89,17 @@ namespace
                 if (ammo > pType->Ammo) ammo = pType->Ammo;
                 pThis->Ammo = ammo;
             }
+            else if (!_stricmp(key, "Image"))
+            {
+                // Handled by the variant-clone path, not here.
+            }
             else
             {
-                // Image/Cost/Armor etc. live on the shared TechnoTypeClass, so
-                // they cannot differ between instances. Say so instead of
-                // silently doing nothing.
+                // Cost/Armor etc. live on the shared TechnoTypeClass, so they
+                // cannot differ between instances. Say so instead of silently
+                // doing nothing. (Image is the exception — see VariantArt.)
                 Debug::Log("[TraitExt]   (instance) %s: key '%s' is TYPE-level and "
-                    "cannot vary per instance — use TraitsRandomScope=Type for it\n",
+                    "cannot vary per instance - use TraitsRandomScope=Type for it\n",
                     pType->ID, key);
             }
         }
@@ -102,6 +109,10 @@ namespace
 DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
 {
     GET(TechnoClass*, pThis, ECX);
+
+    // Logic tick is the safety net for the draw-time Type swap: gameplay must
+    // never run against a clone type.
+    RestorePending();
 
     if (!pThis || !TraitExt::InstanceRandom::Any())
         return 0;
@@ -139,10 +150,18 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
         const int j = pScen->Random.RandomRanged(i, poolN - 1);
         const int tmp = idx[i]; idx[i] = idx[j]; idx[j] = tmp;
 
-        const TraitExt::TraitDef* pDef = pPool->Traits[idx[i]];
+        const int chosen = idx[i];
+        const TraitExt::TraitDef* pDef = pPool->Traits[chosen];
         Debug::Log("[TraitExt] (instance) %s @%p drew '%s'\n",
             pType->ID, pThis, pDef->Name.c_str());
         ApplyOneTrait(pThis, pDef);
+
+        // If that trait carried a variant look, remember it for draw time.
+        if (chosen < static_cast<int>(pPool->CloneIDs.size())
+            && !pPool->CloneIDs[chosen].empty())
+        {
+            TraitExt::VariantArt::Assign(pThis, pPool->CloneIDs[chosen].c_str());
+        }
     }
 
     return 0;
@@ -158,8 +177,52 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
 // instruction stream and sending execution to a wild address. That is what
 // caused three reproducible C0000005 crashes at 0x09C00126 (an address in no
 // module at all). All four frameworks declare 0x5 here for this reason.
+namespace
+{
+    // unit -> the clone type it should be DRAWN as.
+    std::unordered_map<void*, UnitTypeClass*> g_Variant;
+    bool g_VariantEnabled = true;
+
+    // Exactly one unit may be mid-swap at a time; draws are sequential, so the
+    // next draw (or the logic tick) restores the previous one. Keeping the
+    // window this small is what stops house counts / build limits / prereqs
+    // from ever seeing a clone.
+    UnitClass* g_Swapped = nullptr;
+    UnitTypeClass* g_SwappedOriginal = nullptr;
+
+    void RestorePending()
+    {
+        if (g_Swapped && g_SwappedOriginal)
+            g_Swapped->Type = g_SwappedOriginal;
+        g_Swapped = nullptr;
+        g_SwappedOriginal = nullptr;
+    }
+}
+
 namespace TraitExt
 {
+    namespace VariantArt
+    {
+        void Assign(::TechnoClass* pThis, const char* cloneID)
+        {
+            if (!pThis || !cloneID || !*cloneID)
+                return;
+            if (auto* const pClone = UnitTypeClass::Find(cloneID))
+                g_Variant[pThis] = pClone;
+        }
+
+        void Forget(::TechnoClass* pThis)
+        {
+            if (g_Swapped == static_cast<void*>(pThis))
+                RestorePending();
+            g_Variant.erase(pThis);
+        }
+
+        bool Enabled() { return g_VariantEnabled; }
+        void SetEnabled(bool on) { g_VariantEnabled = on; }
+        bool Any() { return !g_Variant.empty(); }
+    }
+
     void ApplyInstanceTraits(::TechnoClass* pThis,
         const std::vector<const TraitDef*>& traits, const char* reason)
     {
@@ -212,10 +275,46 @@ DEFINE_HOOK(0x4571E0, BuildingClass_Infiltrate_TraitExt, 0x5)
     return 0;
 }
 
+// Per-unit variant art, rendering only.
+//
+// 0x73B140 = UnitClass::DrawObject (YRpp: "Draw() calls one of these"), the
+// single dispatcher in front of DrawAsVXL/DrawAsSHP. ECX = UnitClass*. Boundary
+// verified: 83 EC 38 / 53 / 55 is exactly 5 bytes. No framework hooks it, so
+// this site is uncontended.
+//
+// Image lives on ObjectTypeClass (shared by the whole type), so a per-unit look
+// needs a genuinely different type. We point Type at the synthesised clone only
+// for the draw and restore it immediately afterwards, which is why gameplay
+// never sees it. The restore happens at the NEXT draw and again on the logic
+// tick, so a missed one self-corrects within a frame instead of persisting.
+DEFINE_HOOK(0x73B140, UnitClass_DrawObject_VariantArt, 0x5)
+{
+    RestorePending();
+
+    if (!g_VariantEnabled || g_Variant.empty())
+        return 0;
+
+    GET(UnitClass*, pThis, ECX);
+    if (!pThis)
+        return 0;
+
+    const auto it = g_Variant.find(pThis);
+    if (it == g_Variant.end() || !it->second || pThis->Type == it->second)
+        return 0;
+
+    g_Swapped = pThis;
+    g_SwappedOriginal = pThis->Type;
+    pThis->Type = it->second;
+    return 0;
+}
+
 DEFINE_HOOK(0x6F4500, TechnoClass_DTOR_InstanceRandom, 0x5)
 {
     GET(TechnoClass*, pThis, ECX);
     if (pThis)
+    {
         g_Seen.erase(pThis);
+        TraitExt::VariantArt::Forget(pThis);
+    }
     return 0;
 }
