@@ -865,16 +865,24 @@ namespace TraitExt
                             pINI->WriteString(cloneID.c_str(), "Image", art.c_str());
 
                             const auto lit = targetList.find(target);
-                            if (lit != targetList.end())
+                            if (lit == targetList.end())
+                            {
+                                Debug::Log("[TraitExt] WARN %s: no source list known, variant "
+                                    "'%s' cannot be registered as a type\n",
+                                    target.c_str(), cloneID.c_str());
+                            }
+                            else
                             {
                                 const int n2 = pINI->GetKeyCount(lit->second.c_str());
                                 char idx[16];
                                 std::snprintf(idx, sizeof(idx), "%d", n2);
                                 pINI->WriteString(lit->second.c_str(), idx, cloneID.c_str());
-                            }
 
-                            Debug::Log("[TraitExt] %s: variant type '%s' (Image=%s) for trait '%s'\n",
-                                target.c_str(), cloneID.c_str(), art.c_str(), n.c_str());
+                                Debug::Log("[TraitExt] %s: variant '%s' (Image=%s) for '%s' "
+                                    "-> [%s] %s=%s\n",
+                                    target.c_str(), cloneID.c_str(), art.c_str(), n.c_str(),
+                                    lit->second.c_str(), idx, cloneID.c_str());
+                            }
                             break;
                         }
                         ip.CloneIDs.push_back(cloneID);

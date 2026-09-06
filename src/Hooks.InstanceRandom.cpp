@@ -211,8 +211,24 @@ namespace TraitExt
         {
             if (!pThis || !cloneID || !*cloneID)
                 return;
-            if (auto* const pClone = UnitTypeClass::Find(cloneID))
+
+            auto* const pClone = UnitTypeClass::Find(cloneID);
+            if (pClone)
+            {
                 g_Variant[pThis] = pClone;
+            }
+            else
+            {
+                // Logged once per clone id: means the synthesised section never
+                // became a real type (not registered in a list the engine
+                // reads, or written too late to be parsed).
+                static std::unordered_set<std::string> s_warned;
+                if (s_warned.insert(cloneID).second)
+                {
+                    Debug::Log("[TraitExt] WARN variant type '%s' does not exist as a "
+                        "UnitType - the clone section was not turned into a type\n", cloneID);
+                }
+            }
         }
 
         void Forget(::TechnoClass* pThis)
@@ -305,6 +321,14 @@ DEFINE_HOOK(0x73B140, UnitClass_DrawObject_VariantArt, 0x5)
     const auto it = g_Variant.find(pThis);
     if (it == g_Variant.end() || !it->second || pThis->Type == it->second)
         return 0;
+
+    static bool s_loggedFirst = false;
+    if (!s_loggedFirst)
+    {
+        s_loggedFirst = true;
+        Debug::Log("[TraitExt] variant art ACTIVE: first draw swap %s -> %s\n",
+            pThis->Type ? pThis->Type->ID : "?", it->second->ID);
+    }
 
     g_Swapped = pThis;
     g_SwappedOriginal = pThis->Type;
