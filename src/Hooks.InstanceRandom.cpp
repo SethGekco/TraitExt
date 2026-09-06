@@ -297,42 +297,59 @@ DEFINE_HOOK(0x4571E0, BuildingClass_Infiltrate_TraitExt, 0x5)
 
 // Per-unit variant art, rendering only.
 //
-// 0x73B140 = UnitClass::DrawObject (YRpp: "Draw() calls one of these"), the
-// single dispatcher in front of DrawAsVXL/DrawAsSHP. ECX = UnitClass*. Boundary
-// verified: 83 EC 38 / 53 / 55 is exactly 5 bytes. No framework hooks it, so
-// this site is uncontended.
+// Hooked at UnitClass::DrawAsVXL (0x73B470) and DrawAsSHP (0x73C5F0) — YRpp:
+// "main drawing functions - Draw() calls one of these". These are the top-level
+// per-type draws; hooking the lower-level UnitClass::DrawObject (0x73B140)
+// instead was verified in game to be TOO LATE: the swap happened but the art had
+// already been resolved, so the unit still rendered as its base type.
+//
+// Boundaries verified — both start with `81 EC imm32` (6 bytes), so the steal
+// MUST be 0x6; a 5-byte steal would split that instruction. Neither address is
+// hooked by any framework. ECX = UnitClass*.
 //
 // Image lives on ObjectTypeClass (shared by the whole type), so a per-unit look
-// needs a genuinely different type. We point Type at the synthesised clone only
-// for the draw and restore it immediately afterwards, which is why gameplay
-// never sees it. The restore happens at the NEXT draw and again on the logic
-// tick, so a missed one self-corrects within a frame instead of persisting.
-DEFINE_HOOK(0x73B140, UnitClass_DrawObject_VariantArt, 0x5)
+// needs a genuinely different type. Type points at the synthesised clone only
+// for the draw and is restored right after, which is why gameplay never sees it.
+// The restore runs at the next draw and again on the logic tick, so a missed one
+// self-corrects within a frame instead of persisting.
+namespace
 {
-    RestorePending();
-
-    if (!g_VariantEnabled || g_Variant.empty())
-        return 0;
-
-    GET(UnitClass*, pThis, ECX);
-    if (!pThis)
-        return 0;
-
-    const auto it = g_Variant.find(pThis);
-    if (it == g_Variant.end() || !it->second || pThis->Type == it->second)
-        return 0;
-
-    static bool s_loggedFirst = false;
-    if (!s_loggedFirst)
+    void SwapForDraw(UnitClass* pThis)
     {
-        s_loggedFirst = true;
-        Debug::Log("[TraitExt] variant art ACTIVE: first draw swap %s -> %s\n",
-            pThis->Type ? pThis->Type->ID : "?", it->second->ID);
-    }
+        RestorePending();
 
-    g_Swapped = pThis;
-    g_SwappedOriginal = pThis->Type;
-    pThis->Type = it->second;
+        if (!g_VariantEnabled || g_Variant.empty() || !pThis)
+            return;
+
+        const auto it = g_Variant.find(pThis);
+        if (it == g_Variant.end() || !it->second || pThis->Type == it->second)
+            return;
+
+        static bool s_loggedFirst = false;
+        if (!s_loggedFirst)
+        {
+            s_loggedFirst = true;
+            Debug::Log("[TraitExt] variant art ACTIVE: first draw swap %s -> %s\n",
+                pThis->Type ? pThis->Type->ID : "?", it->second->ID);
+        }
+
+        g_Swapped = pThis;
+        g_SwappedOriginal = pThis->Type;
+        pThis->Type = it->second;
+    }
+}
+
+DEFINE_HOOK(0x73B470, UnitClass_DrawAsVXL_VariantArt, 0x6)
+{
+    GET(UnitClass*, pThis, ECX);
+    SwapForDraw(pThis);
+    return 0;
+}
+
+DEFINE_HOOK(0x73C5F0, UnitClass_DrawAsSHP_VariantArt, 0x6)
+{
+    GET(UnitClass*, pThis, ECX);
+    SwapForDraw(pThis);
     return 0;
 }
 
