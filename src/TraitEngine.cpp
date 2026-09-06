@@ -864,6 +864,44 @@ namespace TraitExt
                             pINI->WriteString(cloneID.c_str(), "$Inherits", target.c_str());
                             pINI->WriteString(cloneID.c_str(), "Image", art.c_str());
 
+                            // Turret presence must agree with the borrowed art.
+                            // The clone inherits the TARGET's Turret= (e.g. the
+                            // Grizzly's "yes"), but the art it now wears may have
+                            // no turret voxel at all (TNKD is Turret=no, Mirage
+                            // has none), which is why bodies changed while
+                            // turrets vanished. Adopt the art donor's turret
+                            // settings unless the trait states them itself.
+                            static const char* const kArtKeys[] = { "Turret", "TurretCount" };
+                            for (const char* ak : kArtKeys)
+                            {
+                                bool traitSpecifies = false;
+                                for (const auto& te : it->second.Entries)
+                                {
+                                    if (!_stricmp(te.first.c_str(), ak)) { traitSpecifies = true; break; }
+                                }
+                                if (traitSpecifies)
+                                    continue;
+
+                                const std::string donor = ReadKey(pINI, e.second.c_str(), ak);
+                                if (!donor.empty())
+                                    pINI->WriteString(cloneID.c_str(), ak, donor.c_str());
+                                else if (!_stricmp(ak, "Turret"))
+                                    pINI->WriteString(cloneID.c_str(), ak, "no");
+                            }
+
+                            // Any other TYPE-level key on the trait belongs on
+                            // the clone — that is what makes "change the body
+                            // but keep the turret" (or vice versa) expressible.
+                            for (const auto& te : it->second.Entries)
+                            {
+                                const char* k = te.first.c_str();
+                                if (!_stricmp(k, "Image")
+                                    || !_stricmp(k, "Health") || !_stricmp(k, "Strength")
+                                    || !_stricmp(k, "Veterancy") || !_stricmp(k, "Ammo"))
+                                    continue;   // instance-level, applied per unit
+                                pINI->WriteString(cloneID.c_str(), k, te.second.c_str());
+                            }
+
                             const auto lit = targetList.find(target);
                             if (lit == targetList.end())
                             {
