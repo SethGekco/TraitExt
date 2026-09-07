@@ -193,13 +193,20 @@ namespace
     // from ever seeing a clone.
     UnitClass* g_Swapped = nullptr;
     UnitTypeClass* g_SwappedOriginal = nullptr;
+    int g_SwappedTurretNumber = 0;
+    bool g_SwappedTurretFixed = false;
 
     void RestorePending()
     {
         if (g_Swapped && g_SwappedOriginal)
+        {
             g_Swapped->Type = g_SwappedOriginal;
+            if (g_SwappedTurretFixed)
+                g_Swapped->CurrentTurretNumber = g_SwappedTurretNumber;
+        }
         g_Swapped = nullptr;
         g_SwappedOriginal = nullptr;
+        g_SwappedTurretFixed = false;
     }
 }
 
@@ -336,6 +343,32 @@ namespace
         g_Swapped = pThis;
         g_SwappedOriginal = pThis->Type;
         pThis->Type = it->second;
+
+        // CurrentTurretNumber is a PER-INSTANCE index into the type's turret
+        // voxels, and it was set while this unit was still its base type. Borrow
+        // a multi-turret art donor (the Prism Tank is TurretCount=4) and that
+        // index is meaningless or -1, which silently kills the turret draw on
+        // BOTH paths: Phobos returns early for idx<0, and Antares indexes
+        // ChargerTurrets[-1]. PayloadExt documents the same failure
+        // ("invisible until the unit first fires"), so clamp it into range for
+        // the borrowed type and put the original back afterwards.
+        const int turrets = it->second->TurretCount;
+        if (turrets > 0
+            && (pThis->CurrentTurretNumber < 0 || pThis->CurrentTurretNumber >= turrets))
+        {
+            g_SwappedTurretNumber = pThis->CurrentTurretNumber;
+            g_SwappedTurretFixed = true;
+            pThis->CurrentTurretNumber = 0;
+
+            static bool s_loggedTurret = false;
+            if (!s_loggedTurret)
+            {
+                s_loggedTurret = true;
+                Debug::Log("[TraitExt] variant turret index repaired: %d -> 0 "
+                    "(borrowed type %s has TurretCount=%d)\n",
+                    g_SwappedTurretNumber, it->second->ID, turrets);
+            }
+        }
     }
 }
 
