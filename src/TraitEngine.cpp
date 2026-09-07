@@ -871,6 +871,29 @@ namespace TraitExt
                             // has none), which is why bodies changed while
                             // turrets vanished. Adopt the art donor's turret
                             // settings unless the trait states them itself.
+                            // A MULTI-turret donor (TurretCount>0, e.g. the Prism
+                            // Tank's 4) indexes its turret art per weapon. Lending
+                            // that art to a single-weapon target yields turret
+                            // slots with no weapons behind them and the turret
+                            // renders wrong. Taking the donor's weapons too would
+                            // change gameplay, which defeats a cosmetic feature —
+                            // so refuse the borrow and say why.
+                            double donorTurrets = 0.0;
+                            const std::string donorTC = ReadKey(pINI, e.second.c_str(), "TurretCount");
+                            const std::string selfTC = ReadKey(pINI, target.c_str(), "TurretCount");
+                            double selfTurrets = 0.0;
+                            ParseNumber(donorTC, donorTurrets);
+                            ParseNumber(selfTC, selfTurrets);
+
+                            if (donorTurrets > 0.0 && selfTurrets <= 0.0)
+                            {
+                                Debug::Log("[TraitExt] WARN %s: art donor '%s' is MULTI-TURRET "
+                                    "(TurretCount=%s) but %s is not; its turret art is indexed per "
+                                    "weapon and will not render correctly. Pick a single-turret "
+                                    "donor, or set Turret=/TurretCount= on the trait yourself.\n",
+                                    target.c_str(), e.second.c_str(), donorTC.c_str(), target.c_str());
+                            }
+
                             static const char* const kArtKeys[] = { "Turret", "TurretCount" };
                             for (const char* ak : kArtKeys)
                             {
@@ -880,6 +903,11 @@ namespace TraitExt
                                     if (!_stricmp(te.first.c_str(), ak)) { traitSpecifies = true; break; }
                                 }
                                 if (traitSpecifies)
+                                    continue;
+
+                                // Never import a turret COUNT the target has no
+                                // weapons for.
+                                if (!_stricmp(ak, "TurretCount") && donorTurrets > 0.0 && selfTurrets <= 0.0)
                                     continue;
 
                                 const std::string donor = ReadKey(pINI, e.second.c_str(), ak);
