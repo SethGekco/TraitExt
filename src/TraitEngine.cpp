@@ -871,31 +871,25 @@ namespace TraitExt
                             // has none), which is why bodies changed while
                             // turrets vanished. Adopt the art donor's turret
                             // settings unless the trait states them itself.
-                            // A MULTI-turret donor (TurretCount>0, e.g. the Prism
-                            // Tank's 4) indexes its turret art per weapon. Lending
-                            // that art to a single-weapon target yields turret
-                            // slots with no weapons behind them and the turret
-                            // renders wrong. Taking the donor's weapons too would
-                            // change gameplay, which defeats a cosmetic feature —
-                            // so refuse the borrow and say why.
-                            double donorTurrets = 0.0;
-                            const std::string donorTC = ReadKey(pINI, e.second.c_str(), "TurretCount");
-                            const std::string selfTC = ReadKey(pINI, target.c_str(), "TurretCount");
-                            double selfTurrets = 0.0;
-                            ParseNumber(donorTC, donorTurrets);
-                            ParseNumber(selfTC, selfTurrets);
+                            // Turret rendering is driven by a FAMILY of tags, not
+                            // just Turret=. The Prism Tank, for example, is
+                            // TurretCount=4 with WeaponCount=1 and picks a turret
+                            // voxel by RANGE (Turret.RangeBands /
+                            // Turret.RangeIndices) — copying only Turret and
+                            // TurretCount left the selector unset, so the body
+                            // drew and the turret did not. Inherit the whole
+                            // family from the art donor so type and art agree.
+                            static const char* const kTurretKeys[] = {
+                                "Turret", "TurretCount", "TurretOffset", "UseTurretShadow",
+                                "Turret.RangeBands", "Turret.RangeIndices",
+                                "TurretNotExportedOnGround", "TurretAnim", "TurretAnimIsVoxel",
+                                "TurretAnimX", "TurretAnimY", "TurretAnimZAdjust",
+                                "WeaponTurretIndex1", "WeaponTurretIndex2",
+                                "WeaponTurretIndex3", "WeaponTurretIndex4",
+                            };
 
-                            if (donorTurrets > 0.0 && selfTurrets <= 0.0)
-                            {
-                                Debug::Log("[TraitExt] WARN %s: art donor '%s' is MULTI-TURRET "
-                                    "(TurretCount=%s) but %s is not; its turret art is indexed per "
-                                    "weapon and will not render correctly. Pick a single-turret "
-                                    "donor, or set Turret=/TurretCount= on the trait yourself.\n",
-                                    target.c_str(), e.second.c_str(), donorTC.c_str(), target.c_str());
-                            }
-
-                            static const char* const kArtKeys[] = { "Turret", "TurretCount" };
-                            for (const char* ak : kArtKeys)
+                            int copied = 0;
+                            for (const char* ak : kTurretKeys)
                             {
                                 bool traitSpecifies = false;
                                 for (const auto& te : it->second.Entries)
@@ -903,19 +897,25 @@ namespace TraitExt
                                     if (!_stricmp(te.first.c_str(), ak)) { traitSpecifies = true; break; }
                                 }
                                 if (traitSpecifies)
-                                    continue;
-
-                                // Never import a turret COUNT the target has no
-                                // weapons for.
-                                if (!_stricmp(ak, "TurretCount") && donorTurrets > 0.0 && selfTurrets <= 0.0)
-                                    continue;
+                                    continue;   // author's own value wins
 
                                 const std::string donor = ReadKey(pINI, e.second.c_str(), ak);
                                 if (!donor.empty())
+                                {
                                     pINI->WriteString(cloneID.c_str(), ak, donor.c_str());
+                                    ++copied;
+                                }
                                 else if (!_stricmp(ak, "Turret"))
+                                {
+                                    // Donor has no turret at all: say so
+                                    // explicitly rather than inheriting the
+                                    // target's "yes" and hunting a voxel that
+                                    // does not exist.
                                     pINI->WriteString(cloneID.c_str(), ak, "no");
+                                }
                             }
+                            Debug::Log("[TraitExt]   %s: inherited %d turret tag(s) from '%s'\n",
+                                cloneID.c_str(), copied, e.second.c_str());
 
                             // Any other TYPE-level key on the trait belongs on
                             // the clone — that is what makes "change the body
