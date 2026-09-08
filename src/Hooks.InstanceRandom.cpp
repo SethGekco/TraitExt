@@ -185,6 +185,9 @@ namespace
 {
     // unit -> the clone type it should be DRAWN as.
     std::unordered_map<void*, UnitTypeClass*> g_Variant;
+    // clone type -> must aim with the body instead of a turret.
+    std::unordered_map<void*, bool> g_BodyFacing;
+    std::unordered_set<std::string> g_BodyFacingIDs;
     bool g_VariantEnabled = true;
 
     // Exactly one unit may be mid-swap at a time; draws are sequential, so the
@@ -243,6 +246,24 @@ namespace TraitExt
             if (g_Swapped == static_cast<void*>(pThis))
                 RestorePending();
             g_Variant.erase(pThis);
+        }
+
+        void SetForceBodyFacing(const std::string& cloneID, bool on)
+        {
+            if (on)
+                g_BodyFacingIDs.insert(cloneID);
+            else
+                g_BodyFacingIDs.erase(cloneID);
+        }
+
+        bool NeedsBodyFacing(::TechnoClass* pThis)
+        {
+            if (!pThis || g_BodyFacingIDs.empty())
+                return false;
+            const auto it = g_Variant.find(pThis);
+            if (it == g_Variant.end() || !it->second)
+                return false;
+            return g_BodyFacingIDs.count(it->second->ID) != 0;
         }
 
         bool Enabled() { return g_VariantEnabled; }
@@ -384,6 +405,60 @@ DEFINE_HOOK(0x73C5F0, UnitClass_DrawAsSHP_VariantArt, 0x6)
     GET(UnitClass*, pThis, ECX);
     SwapForDraw(pThis);
     return 0;
+}
+
+// ForceBodyFacing — make a variant aim with its hull instead of a turret.
+//
+// A variant only LOOKS turretless: gameplay still sees the base type (we swap
+// Type for the draw only), so a Tank-Destroyer-looking Grizzly still fires in
+// any direction. This restores the expected behaviour — rotate the hull first,
+// the way TNKD does and MTNK does not.
+//
+// 0x740FD0 = UnitClass::GetFireError, UNHOOKED by any framework. Boundary
+// verified: 83 EC 0C / 53 / 55 is exactly 5 bytes. ECX = this, stack +0x4 =
+// target.
+//
+// Returning a value needs a flow-replacing jump, and every epilogue in this
+// function overwrites EAX with its own constant. Hooking the ENTRY sidesteps
+// that: nothing has been pushed yet, so ESP already points at the return
+// address and a bare `ret 0xc` at 0x74102A returns correctly with no stack
+// fixup at all.
+//
+// The turret facing (SecondaryFacing) is already aimed at the target, so it
+// doubles as "the direction we want" without recomputing target geometry.
+DEFINE_HOOK(0x740FD0, UnitClass_GetFireError_ForceBodyFacing, 0x5)
+{
+    enum { RetFacing = 0x74102A };   // bare `ret 0xc`
+
+    GET(UnitClass*, pThis, ECX);
+    if (!pThis || !TraitExt::VariantArt::NeedsBodyFacing(pThis))
+        return 0;
+
+    const int body = static_cast<int>(pThis->PrimaryFacing.Current().Raw);
+    const int aim = static_cast<int>(pThis->SecondaryFacing.Current().Raw);
+
+    int diff = body - aim;
+    if (diff < 0) diff = -diff;
+    if (diff > 32768) diff = 65536 - diff;      // wrap the short way round
+
+    // ~11 degrees of slack, matching how forgiving vanilla hull aiming feels.
+    if (diff <= 2048)
+        return 0;
+
+    // Point the hull at the target so it actually turns, then report FACING so
+    // the engine holds fire until it has.
+    pThis->PrimaryFacing.SetDesired(pThis->SecondaryFacing.Current());
+
+    static bool s_logged = false;
+    if (!s_logged)
+    {
+        s_logged = true;
+        Debug::Log("[TraitExt] ForceBodyFacing active: holding fire while hull turns "
+            "(body=%d aim=%d diff=%d)\n", body, aim, diff);
+    }
+
+    R->EAX(static_cast<int>(FireError::FACING));
+    return RetFacing;
 }
 
 DEFINE_HOOK(0x6F4500, TechnoClass_DTOR_InstanceRandom, 0x5)

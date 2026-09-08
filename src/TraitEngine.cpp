@@ -927,6 +927,22 @@ namespace TraitExt
                                     || !_stricmp(k, "Health") || !_stricmp(k, "Strength")
                                     || !_stricmp(k, "Veterancy") || !_stricmp(k, "Ammo"))
                                     continue;   // instance-level, applied per unit
+
+                                // TraitExt's own key, not a game key — don't
+                                // write it into the clone section.
+                                if (!_stricmp(k, "ForceBodyFacing"))
+                                {
+                                    const bool on = !te.second.empty()
+                                        && (te.second[0] == 'y' || te.second[0] == 'Y'
+                                            || te.second[0] == 't' || te.second[0] == 'T'
+                                            || te.second[0] == '1');
+                                    VariantArt::SetForceBodyFacing(cloneID, on);
+                                    if (on)
+                                        Debug::Log("[TraitExt]   %s: must aim with its hull "
+                                            "(ForceBodyFacing)\n", cloneID.c_str());
+                                    continue;
+                                }
+
                                 pINI->WriteString(cloneID.c_str(), k, te.second.c_str());
                             }
 

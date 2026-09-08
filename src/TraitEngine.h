@@ -86,6 +86,12 @@ namespace TraitExt
     // limits and prerequisites never observe the clone.
     namespace VariantArt
     {
+        // A variant may require the unit to aim with its BODY rather than a
+        // turret — the point of a turretless-looking variant like the Tank
+        // Destroyer, which in vanilla has to rotate to fire.
+        void SetForceBodyFacing(const std::string& cloneID, bool on);
+        bool NeedsBodyFacing(::TechnoClass* pThis);
+
         void Assign(::TechnoClass* pThis, const char* cloneID);
         void Forget(::TechnoClass* pThis);
         bool Enabled();
