@@ -700,6 +700,29 @@ namespace TraitExt
 
         ReadListSection(pINI, "TraitTargets", targets);
 
+        // A trait naming a section in AppliesTo= is a clear statement of intent,
+        // so treat that section as a target even if it is not in any type list.
+        // This is what lets traits reach sections the lists never cover —
+        // weapons, warheads, projectiles — since YR has no master list for them
+        // (they exist only as sections referenced by name).
+        for (const auto& kv : traits)
+        {
+            for (const auto& want : kv.second.AppliesTo)
+            {
+                if (std::find(targets.begin(), targets.end(), want) != targets.end())
+                    continue;
+                if (!pINI->GetSection(want.c_str()))
+                {
+                    Debug::Log("[TraitExt] WARN trait '%s' AppliesTo '%s', which is not a "
+                        "section in this INI\n", kv.second.Name.c_str(), want.c_str());
+                    continue;
+                }
+                targets.push_back(want);
+                Debug::Log("[TraitExt] '%s' added as a target via AppliesTo (trait '%s')\n",
+                    want.c_str(), kv.second.Name.c_str());
+            }
+        }
+
         std::sort(targets.begin(), targets.end());
         targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
 
