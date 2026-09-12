@@ -7,6 +7,10 @@
 #include <TechnoTypeClass.h>
 #include <FootClass.h>          // generic_cast needs it complete
 #include <FileSystem.h>
+#include <CCFileClass.h>
+#include <FileFormats/VXL.h>
+#include <FileFormats/HVA.h>
+#include <YRMemory.h>
 #include <Utilities/Debug.h>
 
 #include <ctime>
@@ -35,6 +39,114 @@ namespace TraitExt
         std::vector<std::pair<std::string, std::string>> g_CameoRestore;
         bool g_CameoFixEnabled = true;
         bool g_CameoApplied = false;
+    }
+
+    namespace
+    {
+        std::vector<std::pair<std::string, std::string>> g_MixedTurrets;
+        bool g_MixedTurretEnabled = true;
+        bool g_MixedTurretApplied = false;
+
+        // Load "<name>.VXL" + "<name>.HVA" into a VoxelStruct the caller owns.
+        // Modelled on Antares' own turret loader so the pair is prepared the
+        // same way (notably the HVA scale from the VXL tailer).
+        bool LoadVoxelPair(VoxelStruct& out, const char* pName)
+        {
+            char filename[0x40];
+            out.VXL = nullptr;
+            out.HVA = nullptr;
+
+            std::snprintf(filename, sizeof(filename), "%s.VXL", pName);
+            VoxLib* pVXL = nullptr;
+            {
+                auto const pFile = UniqueGamePtr<CCFileClass>(GameCreate<CCFileClass>(filename));
+                if (!pFile->Exists())
+                    return false;
+
+                pVXL = static_cast<VoxLib*>(YRMemory::AllocateChecked(sizeof(VoxLib)));
+                std::memset(pVXL, 0, sizeof(VoxLib));
+                if (!pVXL->ReadFile(pFile.get(), false))
+                    pVXL->Initialized = true;
+            }
+
+            std::snprintf(filename, sizeof(filename), "%s.HVA", pName);
+            MotLib* pHVA = nullptr;
+            {
+                auto const pFile = UniqueGamePtr<CCFileClass>(GameCreate<CCFileClass>(filename));
+                if (pFile->Exists())
+                {
+                    pHVA = static_cast<MotLib*>(YRMemory::AllocateChecked(sizeof(MotLib)));
+                    std::memset(pHVA, 0, sizeof(MotLib));
+                    if (!pHVA->ReadFile(pFile.get()))
+                        pHVA->LoadedFailed = 1;
+                }
+            }
+
+            if (pHVA && !pVXL->Initialized && !pHVA->LoadedFailed)
+            {
+                auto const& tailer = pVXL->TailerData[pVXL->HeaderData->limb_number];
+                pHVA->Scale(tailer.HVAMultiplier);
+                out.VXL = pVXL;
+                out.HVA = pHVA;
+                return true;
+            }
+            return false;
+        }
+    }
+
+    namespace MixedTurret
+    {
+        void Remember(const std::string& cloneID, const std::string& turretArt)
+        {
+            g_MixedTurrets.emplace_back(cloneID, turretArt);
+        }
+
+        bool Enabled() { return g_MixedTurretEnabled; }
+        void SetEnabled(bool on) { g_MixedTurretEnabled = on; }
+
+        void Apply()
+        {
+            if (!g_MixedTurretEnabled || g_MixedTurrets.empty() || g_MixedTurretApplied)
+                return;
+            g_MixedTurretApplied = true;
+
+            for (const auto& kv : g_MixedTurrets)
+            {
+                TechnoTypeClass* const pType = TechnoTypeClass::Find(kv.first.c_str());
+                if (!pType)
+                    continue;
+
+                char name[0x40];
+                int loaded = 0;
+
+                // Slot 0 covers the single-turret case; the indexed slots cover
+                // multi-turret donors (Prism-style). Missing files are normal.
+                std::snprintf(name, sizeof(name), "%sTUR", kv.second.c_str());
+                if (LoadVoxelPair(pType->TurretVoxel, name))
+                    ++loaded;
+                if (LoadVoxelPair(pType->ChargerTurrets[0], name))
+                    ++loaded;
+
+                std::snprintf(name, sizeof(name), "%sBARL", kv.second.c_str());
+                if (LoadVoxelPair(pType->BarrelVoxel, name))
+                    ++loaded;
+                if (LoadVoxelPair(pType->ChargerBarrels[0], name))
+                    ++loaded;
+
+                for (int i = 1; i < 4; ++i)
+                {
+                    std::snprintf(name, sizeof(name), "%sTUR%d", kv.second.c_str(), i);
+                    if (LoadVoxelPair(pType->ChargerTurrets[i], name))
+                        ++loaded;
+                    std::snprintf(name, sizeof(name), "%sBARL%d", kv.second.c_str(), i);
+                    if (LoadVoxelPair(pType->ChargerBarrels[i], name))
+                        ++loaded;
+                }
+
+                Debug::Log("[TraitExt] mixed turret: %s now wears '%s' turret art (%d voxel pair(s))\n",
+                    kv.first.c_str(), kv.second.c_str(), loaded);
+            }
+        }
     }
 
     namespace CameoFix
@@ -539,6 +651,9 @@ namespace TraitExt
         // Kill switch: the draw-time Type swap is the riskiest thing here, so
         // it can be disabled from INI without a rebuild.
         VariantArt::SetEnabled(ReadKey(pINI, SectConfig, "VariantArt", "yes")[0] != 'n');
+        MixedTurret::SetEnabled(ReadKey(pINI, SectConfig, "MixedTurrets", "yes")[0] != 'n');
+        g_MixedTurrets.clear();
+        g_MixedTurretApplied = false;
         // Default ON: a random-art trait almost never wants the cameo to follow.
         g_CameoFixEnabled = ReadKey(pINI, SectConfig, "KeepOriginalCameo", "yes")[0] != 'n'
             && ReadKey(pINI, SectConfig, "KeepOriginalCameo", "yes")[0] != 'N';
@@ -562,6 +677,7 @@ namespace TraitExt
             def.AppliesTo = SplitCSV(ReadKey(pINI, name.c_str(), "AppliesTo"));
             def.RandomPoolFor = SplitCSV(ReadKey(pINI, name.c_str(), "RandomPoolFor"));
             def.RandomScope = ReadKey(pINI, name.c_str(), "RandomScope");
+            def.TurretFrom = ReadKey(pINI, name.c_str(), "TurretFrom");
 
             const int keyCount = pINI->GetKeyCount(name.c_str());
             for (int i = 0; i < keyCount; ++i)
@@ -575,7 +691,8 @@ namespace TraitExt
                     || !std::strcmp(keyName, "Traits")
                     || !std::strcmp(keyName, "AppliesTo")
                     || !std::strcmp(keyName, "RandomPoolFor")
-                    || !std::strcmp(keyName, "RandomScope"))
+                    || !std::strcmp(keyName, "RandomScope")
+                    || !std::strcmp(keyName, "TurretFrom"))
                     continue;
                 if (keyName[0] == '$')
                     continue; // leave $Inherits and friends to Phobos
@@ -939,6 +1056,23 @@ namespace TraitExt
                             }
                             Debug::Log("[TraitExt]   %s: inherited %d turret tag(s) from '%s'\n",
                                 cloneID.c_str(), copied, e.second.c_str());
+
+                            // Mixed turrets: resolve the turret donor's ART name
+                            // the same way the body image is resolved, then have
+                            // the clone load that turret art for itself.
+                            if (!it->second.TurretFrom.empty())
+                            {
+                                std::string tart = it->second.TurretFrom;
+                                for (int hops = 0; hops < 8; ++hops)
+                                {
+                                    const std::string nx = ReadKey(pINI, tart.c_str(), "Image");
+                                    if (nx.empty() || nx == tart) break;
+                                    tart = nx;
+                                }
+                                MixedTurret::Remember(cloneID, tart);
+                                Debug::Log("[TraitExt]   %s: turret art from '%s' (resolved '%s')\n",
+                                    cloneID.c_str(), it->second.TurretFrom.c_str(), tart.c_str());
+                            }
 
                             // Any other TYPE-level key on the trait belongs on
                             // the clone — that is what makes "change the body

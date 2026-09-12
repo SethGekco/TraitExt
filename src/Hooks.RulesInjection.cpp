@@ -55,5 +55,6 @@ DEFINE_HOOK(0x668BF0, RulesClass_ReadFile_TraitInjection, 0x5)
 DEFINE_HOOK(0x679CAF, RulesData_LoadAfterTypeData_TraitCameoFix, 0x5)
 {
     TraitExt::CameoFix::Apply();
+    TraitExt::MixedTurret::Apply();
     return 0;
 }

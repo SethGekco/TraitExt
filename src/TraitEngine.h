@@ -45,6 +45,9 @@ namespace TraitExt
         std::vector<std::string> RandomPoolFor;
         // Optional scope for the pools this trait joins ("Type" or "Instance").
         std::string RandomScope;
+        // Mixed turrets: take the turret (and barrel) art from a DIFFERENT unit
+        // than the body. Resolved to an art name at load.
+        std::string TurretFrom;
         // Author order is preserved: fold order is declaration order.
         std::vector<std::pair<std::string, std::string>> Entries;
         // Per-key mode overrides from "<Key>.Merge=" inside the trait section.
@@ -106,6 +109,19 @@ namespace TraitExt
     // is almost never what a random-art trait wants. When enabled (the default),
     // TraitExt restores each affected type's cameo to the one its ORIGINAL art
     // would have used, after types finish loading.
+    // Mixed turrets. YR derives BOTH body and turret art from one ImageFile
+    // ("<art>.vxl" / "<art>TUR.vxl"), and Antares builds the same names, so no
+    // data key can separate them. Instead the synthesised clone LOADS ITS OWN
+    // turret voxels from the donor's art name — the clone owns them, so there is
+    // no pointer aliasing and nothing can be freed twice.
+    namespace MixedTurret
+    {
+        void Remember(const std::string& cloneID, const std::string& turretArt);
+        void Apply();       // once types (and their art) exist
+        bool Enabled();
+        void SetEnabled(bool on);
+    }
+
     namespace CameoFix
     {
         // targetID -> the art section it used before a trait changed Image.
