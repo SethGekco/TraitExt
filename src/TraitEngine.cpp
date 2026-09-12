@@ -59,27 +59,34 @@ namespace TraitExt
             std::snprintf(filename, sizeof(filename), "%s.VXL", pName);
             VoxLib* pVXL = nullptr;
             {
-                auto const pFile = UniqueGamePtr<CCFileClass>(GameCreate<CCFileClass>(filename));
-                if (!pFile->Exists())
+                CCFileClass* const pFile = GameCreate<CCFileClass>(filename);
+                if (!pFile)
                     return false;
+                if (!pFile->Exists())
+                {
+                    GameDelete(pFile);
+                    return false;
+                }
 
                 pVXL = static_cast<VoxLib*>(YRMemory::AllocateChecked(sizeof(VoxLib)));
                 std::memset(pVXL, 0, sizeof(VoxLib));
-                if (!pVXL->ReadFile(pFile.get(), false))
+                if (!pVXL->ReadFile(pFile, false))
                     pVXL->Initialized = true;
+                GameDelete(pFile);
             }
 
             std::snprintf(filename, sizeof(filename), "%s.HVA", pName);
             MotLib* pHVA = nullptr;
+            if (CCFileClass* const pFile = GameCreate<CCFileClass>(filename))
             {
-                auto const pFile = UniqueGamePtr<CCFileClass>(GameCreate<CCFileClass>(filename));
                 if (pFile->Exists())
                 {
                     pHVA = static_cast<MotLib*>(YRMemory::AllocateChecked(sizeof(MotLib)));
                     std::memset(pHVA, 0, sizeof(MotLib));
-                    if (!pHVA->ReadFile(pFile.get()))
+                    if (!pHVA->ReadFile(pFile))
                         pHVA->LoadedFailed = 1;
                 }
+                GameDelete(pFile);
             }
 
             if (pHVA && !pVXL->Initialized && !pHVA->LoadedFailed)
