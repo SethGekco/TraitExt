@@ -67,6 +67,12 @@ namespace
         for (const auto& entry : pDef->Entries)
         {
             const char* key = entry.first.c_str();
+
+            // TraitExt's own config keys, consumed at load. Not stats, and not
+            // game keys — skip them here or they warn as "not numeric".
+            if (!_stricmp(key, "ForceBodyFacing"))
+                continue;
+
             double value = 0.0;
             if (!ParseDouble(entry.second.c_str(), value))
             {
