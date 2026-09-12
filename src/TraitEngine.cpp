@@ -10,7 +10,7 @@
 #include <CCFileClass.h>
 #include <FileFormats/VXL.h>
 #include <FileFormats/HVA.h>
-#include <YRMemory.h>
+#include <Memory.h>
 #include <Utilities/Debug.h>
 
 #include <ctime>
