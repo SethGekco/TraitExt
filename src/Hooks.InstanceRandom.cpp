@@ -31,6 +31,7 @@
 #include <UnitClass.h>
 #include <UnitTypeClass.h>
 #include <unordered_map>
+#include <cmath>
 #include <ScenarioClass.h>
 
 #include <unordered_set>
@@ -431,11 +432,32 @@ DEFINE_HOOK(0x740FD0, UnitClass_GetFireError_ForceBodyFacing, 0x5)
     enum { RetFacing = 0x74102A };   // bare `ret 0xc`
 
     GET(UnitClass*, pThis, ECX);
-    if (!pThis || !TraitExt::VariantArt::NeedsBodyFacing(pThis))
+    GET_STACK(AbstractClass*, pTarget, 0x4);
+
+    if (!pThis || !pTarget || !TraitExt::VariantArt::NeedsBodyFacing(pThis))
         return 0;
 
+    // Aim at the TARGET, not at the turret.
+    //
+    // Comparing the hull against SecondaryFacing looked right but failed for the
+    // first orders after a unit had been idle: a parked tank has hull and turret
+    // already aligned, so the difference was ~0 and the check passed even though
+    // the target was off to one side. Once the turret began tracking, the two
+    // diverged and it started working — exactly the "only the first few orders"
+    // symptom. The target's own direction has no such warm-up.
+    const CoordStruct here = pThis->GetCoords();
+    const CoordStruct there = pTarget->GetCoords();
+
+    const double dx = static_cast<double>(there.X - here.X);
+    const double dy = static_cast<double>(there.Y - here.Y);
+    if (dx == 0.0 && dy == 0.0)
+        return 0;
+
+    // Game Y grows southward, hence the negation before atan2.
+    const DirStruct want { std::atan2(-dy, dx) };
+
     const int body = static_cast<int>(pThis->PrimaryFacing.Current().Raw);
-    const int aim = static_cast<int>(pThis->SecondaryFacing.Current().Raw);
+    const int aim = static_cast<int>(want.Raw);
 
     int diff = body - aim;
     if (diff < 0) diff = -diff;
@@ -447,7 +469,7 @@ DEFINE_HOOK(0x740FD0, UnitClass_GetFireError_ForceBodyFacing, 0x5)
 
     // Point the hull at the target so it actually turns, then report FACING so
     // the engine holds fire until it has.
-    pThis->PrimaryFacing.SetDesired(pThis->SecondaryFacing.Current());
+    pThis->PrimaryFacing.SetDesired(want);
 
     static bool s_logged = false;
     if (!s_logged)
