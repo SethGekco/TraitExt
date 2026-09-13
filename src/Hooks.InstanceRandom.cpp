@@ -167,17 +167,27 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
         const TraitExt::InstancePool* const pP =
             pT ? TraitExt::InstanceRandom::Find(pT->ID) : nullptr;
 
-        if (pP && pP->RerollFrames > 0 && !pP->CloneIDs.empty())
+        if (pP && pP->RerollMin > 0 && !pP->CloneIDs.empty())
         {
+            // Draw a fresh delay each time, so units that spawned together do
+            // not morph in lockstep.
+            auto nextDelay = [&]() -> int
+            {
+                const int span = pP->RerollMax - pP->RerollMin + 1;
+                return pP->RerollMin + (span > 1
+                    ? static_cast<int>(CosmeticRand() % static_cast<std::uint32_t>(span))
+                    : 0);
+            };
+
             const int now = Unsorted::CurrentFrame;
             const auto nit = g_NextReroll.find(pThis);
             if (nit == g_NextReroll.end())
             {
-                g_NextReroll[pThis] = now + pP->RerollFrames;
+                g_NextReroll[pThis] = now + nextDelay();
             }
             else if (now >= nit->second)
             {
-                nit->second = now + pP->RerollFrames;
+                nit->second = now + nextDelay();
 
                 // Only pick among pooled traits that actually have a look.
                 const int n = static_cast<int>(pP->CloneIDs.size());

@@ -84,10 +84,12 @@ namespace TraitExt
         std::vector<std::string> CloneIDs;
         int CountMin = 1;
         int CountMax = 1;
-        // >0: re-roll the unit's LOOK every N frames, so a unit visibly shifts
-        // between variants mid-match. Appearance only — see the note in
-        // Hooks.InstanceRandom.cpp for why stats are excluded.
-        int RerollFrames = 0;
+        // >0: re-roll the unit's LOOK on this cadence, so a unit visibly shifts
+        // between variants mid-match. A RANGE, re-drawn after each morph, so a
+        // group of units does not pulse in lockstep. Appearance only — see the
+        // note in Hooks.InstanceRandom.cpp for why stats are excluded.
+        int RerollMin = 0;
+        int RerollMax = 0;
     };
 
     // Per-unit cosmetic variant art. Rendering only: the Type pointer is swapped

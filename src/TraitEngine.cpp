@@ -976,16 +976,35 @@ namespace TraitExt
                     ip.CountMax = ip.CountMin;
                     if (cp.size() >= 2 && ParseNumber(cp[1], tmp)) ip.CountMax = static_cast<int>(tmp);
 
-                    double iv = 0.0;
-                    if (ParseNumber(ReadKey(pINI, target.c_str(), "TraitsRandomInterval"), iv))
-                        ip.RerollFrames = static_cast<int>(iv);
+                    // "N" or "min,max" — a range keeps a group of units from
+                    // morphing in lockstep.
+                    auto readInterval = [&](const std::string& spec)
+                    {
+                        if (spec.empty())
+                            return;
+                        const std::vector<std::string> parts = SplitCSV(spec);
+                        double v = 0.0;
+                        if (parts.size() >= 1 && ParseNumber(parts[0], v))
+                        {
+                            ip.RerollMin = static_cast<int>(v);
+                            ip.RerollMax = ip.RerollMin;
+                        }
+                        if (parts.size() >= 2 && ParseNumber(parts[1], v))
+                            ip.RerollMax = static_cast<int>(v);
+                        if (ip.RerollMax < ip.RerollMin)
+                            ip.RerollMax = ip.RerollMin;
+                    };
+
+                    readInterval(ReadKey(pINI, target.c_str(), "TraitsRandomInterval"));
                     for (const auto& n2 : pool)
                     {
                         const auto t2 = traits.find(n2);
-                        if (t2 == traits.end()) continue;
-                        if (ParseNumber(t2->second.RerollInterval, iv) && iv > 0)
-                            ip.RerollFrames = static_cast<int>(iv);
+                        if (t2 != traits.end() && !t2->second.RerollInterval.empty())
+                            readInterval(t2->second.RerollInterval);
                     }
+                    if (ip.RerollMin > 0)
+                        Debug::Log("[TraitExt] %s: look re-rolls every %d..%d frames\n",
+                            target.c_str(), ip.RerollMin, ip.RerollMax);
 
                     int cloneIdx = 0;
                     for (const auto& n : pool)
