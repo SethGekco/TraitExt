@@ -58,7 +58,18 @@ namespace
         return true;
     }
 
-    void ApplyOneTrait(TechnoClass* pThis, const TraitExt::TraitDef* pDef)
+    // One line per type+key for the whole session. These run on the per-unit
+    // logic tick, so an unguarded Debug::Log here floods the log.
+    void WarnOnce(const char* typeID, const char* key, const char* why)
+    {
+        static std::unordered_set<std::string> s_seen;
+        std::string k(typeID ? typeID : "?"); k += '|'; k += key;
+        if (s_seen.insert(k).second)
+            Debug::Log("[TraitExt]   (instance) %s: key '%s' %s\n",
+                typeID ? typeID : "?", key, why);
+    }
+
+    void ApplyOneTrait(TechnoClass* pThis, const TraitExt::TraitDef* pDef, bool hasClone)
     {
         TechnoTypeClass* const pType = pThis->GetTechnoType();
         if (!pType)
@@ -76,9 +87,11 @@ namespace
             double value = 0.0;
             if (!ParseDouble(entry.second.c_str(), value))
             {
-                Debug::Log("[TraitExt]   (instance) %s: key '%s' is not numeric; "
-                    "instance scope supports Health/Strength, Veterancy, Ammo only\n",
-                    pType->ID, key);
+                // A variant clone already carries this key, so there is nothing
+                // to report - and reporting it per unit per frame buried the log.
+                if (!hasClone)
+                    WarnOnce(pType->ID, key, "is not numeric; instance scope supports "
+                        "Health/Strength, Veterancy, Ammo only");
                 continue;
             }
 
@@ -109,9 +122,9 @@ namespace
                 // Cost/Armor etc. live on the shared TechnoTypeClass, so they
                 // cannot differ between instances. Say so instead of silently
                 // doing nothing. (Image is the exception — see VariantArt.)
-                Debug::Log("[TraitExt]   (instance) %s: key '%s' is TYPE-level and "
-                    "cannot vary per instance - use TraitsRandomScope=Type for it\n",
-                    pType->ID, key);
+                if (!hasClone)
+                    WarnOnce(pType->ID, key, "is TYPE-level and cannot vary per instance "
+                        "- use TraitsRandomScope=Type for it");
             }
         }
     }
@@ -163,16 +176,18 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
 
         const int chosen = idx[i];
         const TraitExt::TraitDef* pDef = pPool->Traits[chosen];
+
+        // A variant clone carries this trait's TYPE-level keys (Image, Cost,
+        // Armor...), so the per-instance pass must not complain about them.
+        const bool hasClone = chosen < static_cast<int>(pPool->CloneIDs.size())
+            && !pPool->CloneIDs[chosen].empty();
+
         Debug::Log("[TraitExt] (instance) %s @%p drew '%s'\n",
             pType->ID, pThis, pDef->Name.c_str());
-        ApplyOneTrait(pThis, pDef);
+        ApplyOneTrait(pThis, pDef, hasClone);
 
-        // If that trait carried a variant look, remember it for draw time.
-        if (chosen < static_cast<int>(pPool->CloneIDs.size())
-            && !pPool->CloneIDs[chosen].empty())
-        {
+        if (hasClone)
             TraitExt::VariantArt::Assign(pThis, pPool->CloneIDs[chosen].c_str());
-        }
     }
 
     return 0;
@@ -288,7 +303,7 @@ namespace TraitExt
         {
             Debug::Log("[TraitExt] (%s) %s @%p applying '%s'\n",
                 reason, pType ? pType->ID : "?", pThis, pDef->Name.c_str());
-            ApplyOneTrait(pThis, pDef);
+            ApplyOneTrait(pThis, pDef, false);
         }
     }
 }
