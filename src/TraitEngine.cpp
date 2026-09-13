@@ -685,6 +685,7 @@ namespace TraitExt
             def.RandomPoolFor = SplitCSV(ReadKey(pINI, name.c_str(), "RandomPoolFor"));
             def.RandomScope = ReadKey(pINI, name.c_str(), "RandomScope");
             def.TurretFrom = ReadKey(pINI, name.c_str(), "TurretFrom");
+            def.RerollInterval = ReadKey(pINI, name.c_str(), "RerollInterval");
 
             const int keyCount = pINI->GetKeyCount(name.c_str());
             for (int i = 0; i < keyCount; ++i)
@@ -699,7 +700,8 @@ namespace TraitExt
                     || !std::strcmp(keyName, "AppliesTo")
                     || !std::strcmp(keyName, "RandomPoolFor")
                     || !std::strcmp(keyName, "RandomScope")
-                    || !std::strcmp(keyName, "TurretFrom"))
+                    || !std::strcmp(keyName, "TurretFrom")
+                    || !std::strcmp(keyName, "RerollInterval"))
                     continue;
                 if (keyName[0] == '$')
                     continue; // leave $Inherits and friends to Phobos
@@ -973,6 +975,17 @@ namespace TraitExt
                     if (cp.size() >= 1 && ParseNumber(cp[0], tmp)) ip.CountMin = static_cast<int>(tmp);
                     ip.CountMax = ip.CountMin;
                     if (cp.size() >= 2 && ParseNumber(cp[1], tmp)) ip.CountMax = static_cast<int>(tmp);
+
+                    double iv = 0.0;
+                    if (ParseNumber(ReadKey(pINI, target.c_str(), "TraitsRandomInterval"), iv))
+                        ip.RerollFrames = static_cast<int>(iv);
+                    for (const auto& n2 : pool)
+                    {
+                        const auto t2 = traits.find(n2);
+                        if (t2 == traits.end()) continue;
+                        if (ParseNumber(t2->second.RerollInterval, iv) && iv > 0)
+                            ip.RerollFrames = static_cast<int>(iv);
+                    }
 
                     int cloneIdx = 0;
                     for (const auto& n : pool)

@@ -33,14 +33,30 @@
 #include <unordered_map>
 #include <cmath>
 #include <ScenarioClass.h>
+#include <Fundamentals.h>   // Unsorted::CurrentFrame
 
 #include <unordered_set>
 #include <cstdlib>
 #include <cstring>
+#include <cstdint>
 
 namespace
 {
     std::unordered_set<void*> g_Seen;
+    // unit -> frame at which its LOOK should be re-rolled again.
+    std::unordered_map<void*, int> g_NextReroll;
+
+    // Cosmetic re-roll RNG. Deliberately LOCAL, not ScenarioClass::Random:
+    // appearance is unsynced by design, and drawing from the synced generator
+    // here would perturb the stream every N frames for purely visual reasons.
+    std::uint32_t g_CosmeticRng = 0x1234567u;
+    std::uint32_t CosmeticRand()
+    {
+        g_CosmeticRng ^= g_CosmeticRng << 13;
+        g_CosmeticRng ^= g_CosmeticRng >> 17;
+        g_CosmeticRng ^= g_CosmeticRng << 5;
+        return g_CosmeticRng;
+    }
 
     // Defined further down with the variant-art state; declared here because
     // the logic-tick hook below is the safety net that undoes a draw swap.
@@ -141,9 +157,43 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
     if (!pThis || !TraitExt::InstanceRandom::Any())
         return 0;
 
-    // Per-instance one-shot guard (the tick re-runs every frame).
+    // Periodic LOOK re-roll, if the pool asked for one. Appearance only: a
+    // unit that silently changed armour or veterancy mid-fight would be a
+    // gameplay surprise, and those are synced state. This is purely what the
+    // draw hook reads, so an unsynced local RNG is correct here.
     if (g_Seen.count(pThis))
+    {
+        TechnoTypeClass* const pT = pThis->GetTechnoType();
+        const TraitExt::InstancePool* const pP =
+            pT ? TraitExt::InstanceRandom::Find(pT->ID) : nullptr;
+
+        if (pP && pP->RerollFrames > 0 && !pP->CloneIDs.empty())
+        {
+            const int now = Unsorted::CurrentFrame;
+            const auto nit = g_NextReroll.find(pThis);
+            if (nit == g_NextReroll.end())
+            {
+                g_NextReroll[pThis] = now + pP->RerollFrames;
+            }
+            else if (now >= nit->second)
+            {
+                nit->second = now + pP->RerollFrames;
+
+                // Only pick among pooled traits that actually have a look.
+                const int n = static_cast<int>(pP->CloneIDs.size());
+                for (int tries = 0; tries < n; ++tries)
+                {
+                    const int pick = static_cast<int>(CosmeticRand() % static_cast<std::uint32_t>(n));
+                    if (!pP->CloneIDs[pick].empty())
+                    {
+                        TraitExt::VariantArt::Assign(pThis, pP->CloneIDs[pick].c_str());
+                        break;
+                    }
+                }
+            }
+        }
         return 0;
+    }
 
     TechnoTypeClass* const pType = pThis->GetTechnoType();
     if (!pType)
@@ -510,6 +560,7 @@ DEFINE_HOOK(0x6F4500, TechnoClass_DTOR_InstanceRandom, 0x5)
     if (pThis)
     {
         g_Seen.erase(pThis);
+        g_NextReroll.erase(pThis);
         TraitExt::VariantArt::Forget(pThis);
     }
     return 0;
