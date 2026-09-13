@@ -1107,6 +1107,39 @@ namespace TraitExt
                                     continue;
                                 }
 
+                                // The clone is swapped in ONLY for the draw, so
+                                // only keys the renderer reads can have any
+                                // effect. Cost/Armor/Strength/Prerequisite and
+                                // friends belong to the real buildable type —
+                                // writing them here would look like it works and
+                                // silently do nothing (Rex hit exactly this with
+                                // Cost). Name the limit instead.
+                                static const char* const kDrawKeys[] = {
+                                    "Turret", "TurretCount", "TurretOffset", "UseTurretShadow",
+                                    "Turret.RangeBands", "Turret.RangeIndices",
+                                    "TurretNotExportedOnGround", "TurretAnim", "TurretAnimIsVoxel",
+                                    "TurretAnimX", "TurretAnimY", "TurretAnimZAdjust",
+                                    "WeaponTurretIndex1", "WeaponTurretIndex2",
+                                    "WeaponTurretIndex3", "WeaponTurretIndex4",
+                                    "Voxel", "Remapable", "AlphaImage", "Palette",
+                                };
+
+                                bool drawRelevant = false;
+                                for (const char* dk : kDrawKeys)
+                                {
+                                    if (!_stricmp(k, dk)) { drawRelevant = true; break; }
+                                }
+
+                                if (!drawRelevant)
+                                {
+                                    Debug::Log("[TraitExt]   WARN %s: '%s' has NO EFFECT in "
+                                        "TraitsRandomScope=Instance — the variant is used only "
+                                        "for drawing, so gameplay keys still come from [%s]. "
+                                        "Use TraitsRandomScope=Type for it.\n",
+                                        cloneID.c_str(), k, target.c_str());
+                                    continue;
+                                }
+
                                 pINI->WriteString(cloneID.c_str(), k, te.second.c_str());
                             }
 
