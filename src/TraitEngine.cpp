@@ -856,6 +856,16 @@ namespace TraitExt
         // This is what lets traits reach sections the lists never cover —
         // weapons, warheads, projectiles — since YR has no master list for them
         // (they exist only as sections referenced by name).
+        // Variant art swaps the Type pointer inside UnitClass::DrawAsVXL /
+        // DrawAsSHP and resolves clones through UnitTypeClass - both are
+        // VEHICLE paths. Infantry, aircraft and buildings draw elsewhere, so a
+        // clone for them would be built and then never used. Say so at load.
+        auto artCapable = [&](const std::string& tgt) -> bool
+        {
+            const auto lit = targetList.find(tgt);
+            return lit != targetList.end() && !_stricmp(lit->second.c_str(), "VehicleTypes");
+        };
+
         // Conditional traits are NOT folded statically — they must be judged
         // per unit against its owner's buildings, or one player's Battle Lab
         // would upgrade everybody's units.
@@ -881,6 +891,15 @@ namespace TraitExt
                 {
                     if (_stricmp(e.first.c_str(), "Image") != 0)
                         continue;
+
+                    if (!artCapable(want))
+                    {
+                        Debug::Log("[TraitExt] WARN %s: trait '%s' sets Image, but variant art "
+                            "is VEHICLE-ONLY (the draw swap hooks UnitClass). %s is not a "
+                            "VehicleType, so its look cannot change - the trait's other keys "
+                            "still apply.\n", want.c_str(), def.Name.c_str(), want.c_str());
+                        break;
+                    }
 
                     std::string art = e.second;
                     for (int hops = 0; hops < 8; ++hops)
@@ -1127,6 +1146,16 @@ namespace TraitExt
                         {
                             if (_stricmp(e.first.c_str(), "Image") != 0)
                                 continue;
+
+                            if (!artCapable(target))
+                            {
+                                Debug::Log("[TraitExt] WARN %s: trait '%s' sets Image, but "
+                                    "variant art is VEHICLE-ONLY (the draw swap hooks "
+                                    "UnitClass). %s is not a VehicleType, so its look cannot "
+                                    "vary per unit - other keys still apply.\n",
+                                    target.c_str(), n.c_str(), target.c_str());
+                                break;
+                            }
 
                             std::string art = e.second;
                             for (int hops = 0; hops < 8; ++hops)
