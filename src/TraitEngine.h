@@ -5,8 +5,10 @@
 #include <utility>
 
 class CCINIClass;
-class TechnoClass;   // must be at GLOBAL scope: declaring it inside namespace
-                     // TraitExt would create a distinct TraitExt::TechnoClass
+// Both must be at GLOBAL scope: declaring them inside namespace TraitExt would
+// create distinct TraitExt::TechnoClass / TraitExt::TechnoTypeClass types.
+class TechnoClass;
+class TechnoTypeClass;
 
 namespace TraitExt
 {
@@ -126,6 +128,23 @@ namespace TraitExt
     // data key can separate them. Instead the synthesised clone LOADS ITS OWN
     // turret voxels from the donor's art name — the clone owns them, so there is
     // no pointer aliasing and nothing can be freed twice.
+    // Per-unit WEAPONS. The weapon is fetched through TechnoClass::GetWeapon,
+    // which takes the INSTANCE — so unlike Cost or Armor it can be answered
+    // per unit by handing back the variant clone's weapon instead.
+    bool IsWeaponKey(const char* key);
+
+    namespace VariantWeapon
+    {
+        void MarkClone(const std::string& cloneID);   // this clone overrides weapons
+        bool CloneHasWeapon(const std::string& cloneID);
+        void Assign(::TechnoClass* pThis, const char* cloneID);
+        void Forget(::TechnoClass* pThis);
+        bool Any();
+        bool Enabled();
+        void SetEnabled(bool on);
+        ::TechnoTypeClass* For(::TechnoClass* pThis);
+    }
+
     namespace MixedTurret
     {
         void Remember(const std::string& cloneID, const std::string& turretArt);

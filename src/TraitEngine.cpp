@@ -23,6 +23,7 @@
 #include <cmath>
 #include <algorithm>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace TraitExt
 {
@@ -98,6 +99,52 @@ namespace TraitExt
                 return true;
             }
             return false;
+        }
+    }
+
+    namespace
+    {
+        std::unordered_map<void*, TechnoTypeClass*> g_VariantWeapon;
+        std::unordered_set<std::string> g_WeaponClones;
+        bool g_VariantWeaponEnabled = true;
+    }
+
+    bool IsWeaponKey(const char* k)
+    {
+        static const char* const kWeaponKeys[] = {
+            "Primary", "Secondary", "ElitePrimary", "EliteSecondary",
+            "Weapon1", "Weapon2", "Weapon3", "Weapon4",
+            "EliteWeapon1", "EliteWeapon2", "EliteWeapon3", "EliteWeapon4",
+        };
+        for (const char* w : kWeaponKeys)
+            if (!_stricmp(k, w))
+                return true;
+        return false;
+    }
+
+    namespace VariantWeapon
+    {
+        void MarkClone(const std::string& cloneID) { g_WeaponClones.insert(cloneID); }
+        bool CloneHasWeapon(const std::string& cloneID)
+        {
+            return g_WeaponClones.count(cloneID) != 0;
+        }
+        void Assign(::TechnoClass* pThis, const char* cloneID)
+        {
+            if (!pThis || !cloneID || !*cloneID || !g_WeaponClones.count(cloneID))
+                return;
+            if (auto* const p = TechnoTypeClass::Find(cloneID))
+                g_VariantWeapon[pThis] = p;
+        }
+        void Forget(::TechnoClass* pThis) { g_VariantWeapon.erase(pThis); }
+        bool Any() { return !g_VariantWeapon.empty(); }
+        bool Enabled() { return g_VariantWeaponEnabled; }
+        void SetEnabled(bool on) { g_VariantWeaponEnabled = on; }
+
+        TechnoTypeClass* For(::TechnoClass* pThis)
+        {
+            const auto it = g_VariantWeapon.find(pThis);
+            return it == g_VariantWeapon.end() ? nullptr : it->second;
         }
     }
 
@@ -682,6 +729,8 @@ namespace TraitExt
         VariantArt::SetEnabled(ReadKey(pINI, SectConfig, "VariantArt", "yes")[0] != 'n');
         MixedTurret::SetEnabled(ReadKey(pINI, SectConfig, "MixedTurrets", "yes")[0] != 'n');
         g_MixedTurrets.clear();
+        g_WeaponClones.clear();
+        VariantWeapon::SetEnabled(ReadKey(pINI, SectConfig, "VariantWeapons", "yes")[0] != 'n');
         Conditional::Clear();
         g_MixedTurretApplied = false;
         // Default ON: a random-art trait almost never wants the cameo to follow.
@@ -1289,6 +1338,17 @@ namespace TraitExt
                                 for (const char* dk : kDrawKeys)
                                 {
                                     if (!_stricmp(k, dk)) { drawRelevant = true; break; }
+                                }
+
+                                // Weapons ARE answerable per unit, because the
+                                // engine asks the instance (TechnoClass::
+                                // GetWeapon) rather than the type. Let them onto
+                                // the clone and flag it.
+                                if (!drawRelevant && IsWeaponKey(k))
+                                {
+                                    VariantWeapon::MarkClone(cloneID);
+                                    pINI->WriteString(cloneID.c_str(), k, te.second.c_str());
+                                    continue;
                                 }
 
                                 if (!drawRelevant)

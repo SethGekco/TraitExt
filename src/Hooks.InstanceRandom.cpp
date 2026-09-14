@@ -224,6 +224,7 @@ namespace
                 if (!ct.CloneID.empty())
                 {
                     TraitExt::VariantArt::Assign(pThis, ct.CloneID.c_str());
+                    TraitExt::VariantWeapon::Assign(pThis, ct.CloneID.c_str());
                     tookLook = true;
                 }
             }
@@ -237,6 +238,7 @@ namespace
         // Gate closed and nothing else claims the look: back to the base type.
         if (!tookLook && mask == 0)
             TraitExt::VariantArt::Forget(pThis);
+        TraitExt::VariantWeapon::Forget(pThis);
     }
 }
 
@@ -661,6 +663,59 @@ DEFINE_HOOK(0x740FD0, UnitClass_GetFireError_ForceBodyFacing, 0x5)
     return RetFacing;
 }
 
+// Per-unit WEAPONS.
+//
+// 0x70E140 = TechnoClass::GetWeapon(int). Crucially this takes the INSTANCE
+// (ECX), not the type — which is exactly why weapons can vary per unit while
+// Cost and Armor cannot: those are only ever asked of the shared type.
+//
+// Boundary verified: 56 / 57 / 8B 7C 24 0C is exactly 6 bytes. In the RELEASE
+// channel nothing hooks it (only Phobos PR#1168, which is not in this build).
+//
+// Returning a value needs a flow-replacing jump, and the epilogues pop first,
+// so we hook the ENTRY: nothing is pushed yet, ESP already points at the return
+// address, and 0x70E151 is a bare `ret 4`. Same trick as GetFireError.
+//
+// SYNC: the variant that selects the weapon was drawn from ScenarioClass::Random
+// (the synced generator), so every client resolves the same weapon for the same
+// unit. This is game logic, not cosmetics — it must not use the local RNG.
+DEFINE_HOOK(0x70E140, TechnoClass_GetWeapon_Variant, 0x6)
+{
+    enum { RetWeapon = 0x70E151 };   // bare `ret 4`
+
+    if (!TraitExt::VariantWeapon::Enabled() || !TraitExt::VariantWeapon::Any())
+        return 0;
+
+    GET(TechnoClass*, pThis, ECX);
+    GET_STACK(int, index, 0x4);
+
+    if (!pThis || index < 0 || index >= TechnoTypeClass::MaxWeapons)
+        return 0;
+
+    TechnoTypeClass* const pVariant = TraitExt::VariantWeapon::For(pThis);
+    if (!pVariant)
+        return 0;
+
+    // Mirror vanilla's elite selection, just off the variant's arrays.
+    WeaponStruct* const pWeapon = pThis->Veterancy.IsElite()
+        ? &pVariant->EliteWeapon[index]
+        : &pVariant->Weapon[index];
+
+    if (!pWeapon->WeaponType)
+        return 0;   // variant leaves this slot empty: fall back to vanilla
+
+    static bool s_logged = false;
+    if (!s_logged)
+    {
+        s_logged = true;
+        Debug::Log("[TraitExt] variant weapon ACTIVE: slot %d from '%s'\n",
+            index, pVariant->ID);
+    }
+
+    R->EAX(pWeapon);
+    return RetWeapon;
+}
+
 DEFINE_HOOK(0x6F4500, TechnoClass_DTOR_InstanceRandom, 0x5)
 {
     GET(TechnoClass*, pThis, ECX);
@@ -671,6 +726,7 @@ DEFINE_HOOK(0x6F4500, TechnoClass_DTOR_InstanceRandom, 0x5)
         g_NextCondCheck.erase(pThis);
         g_CondActive.erase(pThis);
         TraitExt::VariantArt::Forget(pThis);
+        TraitExt::VariantWeapon::Forget(pThis);
     }
     return 0;
 }
