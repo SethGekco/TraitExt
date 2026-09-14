@@ -87,5 +87,12 @@ match, Instance for per-unit looks.
 * **Numeric folds need an INI-visible base.** Engine defaults are in code, not
   INI, so `Add`/`Multiply` on a key absent from rules logs a warning and applies
   as `Override`.
+* **`Multiply` compounds against the base, not against your intent.** `Damage=2.0`
+  on a 300-damage weapon gives 600; `Damage=200.0` gives 60,000. Easy to crank a
+  test value and forget what the comment said.
+* **Variant art (per-unit looks) is VEHICLE-ONLY.** Clones resolve through
+  `UnitTypeClass` and the draw swap hooks `UnitClass`, so infantry, aircraft and
+  buildings cannot change appearance — their other trait keys still apply, and
+  TraitExt warns at load.
 * **Cameos come from `artmd.ini`**, which TraitExt does not process, so a cameo
   cannot be set directly — only inherited via `Image=` (or kept, the default).
