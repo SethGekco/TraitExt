@@ -45,6 +45,10 @@ namespace
     std::unordered_set<void*> g_Seen;
     // unit -> frame at which its LOOK should be re-rolled again.
     std::unordered_map<void*, int> g_NextReroll;
+    // unit -> frame of its next prerequisite re-check, and which gated traits
+    // are currently satisfied for it.
+    std::unordered_map<void*, int> g_NextCondCheck;
+    std::unordered_map<void*, unsigned> g_CondActive;
 
     // Cosmetic re-roll RNG. Deliberately LOCAL, not ScenarioClass::Random:
     // appearance is unsynced by design, and drawing from the synced generator
@@ -83,6 +87,24 @@ namespace
         if (s_seen.insert(k).second)
             Debug::Log("[TraitExt]   (instance) %s: key '%s' %s\n",
                 typeID ? typeID : "?", key, why);
+    }
+
+    // Does this unit's OWNER have everything the gate asks for? Judged per
+    // unit, never per type: types are shared by every house, so a type-level
+    // unlock would arm the enemy from your own tech.
+    bool OwnerMeets(TechnoClass* pThis, const std::vector<std::string>& req)
+    {
+        HouseClass* const pOwner = pThis ? pThis->Owner : nullptr;
+        if (!pOwner)
+            return false;
+
+        for (const auto& id : req)
+        {
+            TechnoTypeClass* const pNeed = TechnoTypeClass::Find(id.c_str());
+            if (!pNeed || pOwner->CountOwnedAndPresent(pNeed) <= 0)
+                return false;
+        }
+        return true;
     }
 
     void ApplyOneTrait(TechnoClass* pThis, const TraitExt::TraitDef* pDef, bool hasClone)
@@ -146,6 +168,78 @@ namespace
     }
 }
 
+namespace
+{
+    // Re-checked on a cadence rather than every frame: prerequisites change
+    // when a building finishes or dies, not continuously, and this runs for
+    // every unit alive.
+    void EvaluateConditionals(TechnoClass* pThis)
+    {
+        if (!TraitExt::Conditional::Any() || !pThis)
+            return;
+
+        TechnoTypeClass* const pType = pThis->GetTechnoType();
+        if (!pType)
+            return;
+
+        const auto* pList = TraitExt::Conditional::Find(pType->ID);
+        if (!pList)
+            return;
+
+        const int now = Unsorted::CurrentFrame;
+        const auto nit = g_NextCondCheck.find(pThis);
+        if (nit != g_NextCondCheck.end() && now < nit->second)
+            return;
+        g_NextCondCheck[pThis] = now + 15;   // ~1s
+
+        unsigned mask = 0;
+        for (size_t i = 0; i < pList->size() && i < 32; ++i)
+        {
+            if (OwnerMeets(pThis, (*pList)[i].Requirement))
+                mask |= (1u << i);
+        }
+
+        const unsigned was = g_CondActive.count(pThis) ? g_CondActive[pThis] : 0u;
+        if (mask == was)
+            return;
+        g_CondActive[pThis] = mask;
+
+        // Appearance follows the gate both ways; stats are applied when the
+        // gate opens and deliberately NOT rolled back when it closes, because
+        // un-applying a fold is not generally possible.
+        bool tookLook = false;
+        for (size_t i = 0; i < pList->size() && i < 32; ++i)
+        {
+            const bool on = (mask & (1u << i)) != 0;
+            const bool before = (was & (1u << i)) != 0;
+            if (on == before)
+                continue;
+
+            const TraitExt::ConditionalTrait& ct = (*pList)[i];
+            if (on)
+            {
+                Debug::Log("[TraitExt] (unlock) %s @%p: '%s' satisfied\n",
+                    pType->ID, pThis, ct.Def->Name.c_str());
+                ApplyOneTrait(pThis, ct.Def, !ct.CloneID.empty());
+                if (!ct.CloneID.empty())
+                {
+                    TraitExt::VariantArt::Assign(pThis, ct.CloneID.c_str());
+                    tookLook = true;
+                }
+            }
+            else
+            {
+                Debug::Log("[TraitExt] (unlock) %s @%p: '%s' no longer satisfied\n",
+                    pType->ID, pThis, ct.Def->Name.c_str());
+            }
+        }
+
+        // Gate closed and nothing else claims the look: back to the base type.
+        if (!tookLook && mask == 0)
+            TraitExt::VariantArt::Forget(pThis);
+    }
+}
+
 DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
 {
     GET(TechnoClass*, pThis, ECX);
@@ -202,12 +296,15 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
                 }
             }
         }
+        EvaluateConditionals(pThis);
         return 0;
     }
 
     TechnoTypeClass* const pType = pThis->GetTechnoType();
     if (!pType)
         return 0;
+
+    EvaluateConditionals(pThis);
 
     const TraitExt::InstancePool* pPool = TraitExt::InstanceRandom::Find(pType->ID);
     if (!pPool)
@@ -571,6 +668,8 @@ DEFINE_HOOK(0x6F4500, TechnoClass_DTOR_InstanceRandom, 0x5)
     {
         g_Seen.erase(pThis);
         g_NextReroll.erase(pThis);
+        g_NextCondCheck.erase(pThis);
+        g_CondActive.erase(pThis);
         TraitExt::VariantArt::Forget(pThis);
     }
     return 0;

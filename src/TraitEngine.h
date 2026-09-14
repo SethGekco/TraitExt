@@ -50,6 +50,10 @@ namespace TraitExt
         std::string TurretFrom;
         // Per-trait way to set the pool's re-roll cadence (frames).
         std::string RerollInterval;
+        // Prerequisite gate: the unit's OWNER must have all of these present
+        // for the trait to apply. Checked per unit, because type data is shared
+        // by every house — a type-level unlock would arm the enemy too.
+        std::vector<std::string> Requirement;
         // Author order is preserved: fold order is declaration order.
         std::vector<std::pair<std::string, std::string>> Entries;
         // Per-key mode overrides from "<Key>.Merge=" inside the trait section.
@@ -145,6 +149,24 @@ namespace TraitExt
     // Instance scope is deliberate: BuildingTypeClass is shared by every house,
     // so type-level application would buff the victim's whole faction (and
     // everyone else's) rather than the infiltrated structure.
+    // Prerequisite-gated traits. Registered at load, evaluated per unit at
+    // runtime so each house is judged on its own buildings, and re-checked so a
+    // unit updates when the building goes up or is destroyed.
+    struct ConditionalTrait
+    {
+        const TraitDef* Def = nullptr;
+        std::vector<std::string> Requirement;
+        std::string CloneID;        // empty unless the trait changes appearance
+    };
+
+    namespace Conditional
+    {
+        const std::vector<ConditionalTrait>* Find(const char* typeID);
+        bool Any();
+        void Register(const std::string& targetID, const ConditionalTrait& ct);
+        void Clear();
+    }
+
     namespace SpyTraits
     {
         const std::vector<const TraitDef*>* Find(const char* buildingTypeID);

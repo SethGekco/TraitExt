@@ -227,6 +227,28 @@ namespace TraitExt
         std::unordered_map<std::string, std::vector<const TraitDef*>> g_SpyTraits;
     }
 
+    namespace
+    {
+        std::unordered_map<std::string, std::vector<ConditionalTrait>> g_Conditional;
+    }
+
+    namespace Conditional
+    {
+        const std::vector<ConditionalTrait>* Find(const char* typeID)
+        {
+            if (!typeID || g_Conditional.empty())
+                return nullptr;
+            const auto it = g_Conditional.find(typeID);
+            return (it == g_Conditional.end()) ? nullptr : &it->second;
+        }
+        bool Any() { return !g_Conditional.empty(); }
+        void Register(const std::string& targetID, const ConditionalTrait& ct)
+        {
+            g_Conditional[targetID].push_back(ct);
+        }
+        void Clear() { g_Conditional.clear(); }
+    }
+
     namespace SpyTraits
     {
         const std::vector<const TraitDef*>* Find(const char* buildingTypeID)
@@ -660,6 +682,7 @@ namespace TraitExt
         VariantArt::SetEnabled(ReadKey(pINI, SectConfig, "VariantArt", "yes")[0] != 'n');
         MixedTurret::SetEnabled(ReadKey(pINI, SectConfig, "MixedTurrets", "yes")[0] != 'n');
         g_MixedTurrets.clear();
+        Conditional::Clear();
         g_MixedTurretApplied = false;
         // Default ON: a random-art trait almost never wants the cameo to follow.
         g_CameoFixEnabled = ReadKey(pINI, SectConfig, "KeepOriginalCameo", "yes")[0] != 'n'
@@ -686,6 +709,7 @@ namespace TraitExt
             def.RandomScope = ReadKey(pINI, name.c_str(), "RandomScope");
             def.TurretFrom = ReadKey(pINI, name.c_str(), "TurretFrom");
             def.RerollInterval = ReadKey(pINI, name.c_str(), "RerollInterval");
+            def.Requirement = SplitCSV(ReadKey(pINI, name.c_str(), "Requirement"));
 
             const int keyCount = pINI->GetKeyCount(name.c_str());
             for (int i = 0; i < keyCount; ++i)
@@ -701,7 +725,8 @@ namespace TraitExt
                     || !std::strcmp(keyName, "RandomPoolFor")
                     || !std::strcmp(keyName, "RandomScope")
                     || !std::strcmp(keyName, "TurretFrom")
-                    || !std::strcmp(keyName, "RerollInterval"))
+                    || !std::strcmp(keyName, "RerollInterval")
+                    || !std::strcmp(keyName, "Requirement"))
                     continue;
                 if (keyName[0] == '$')
                     continue; // leave $Inherits and friends to Phobos
@@ -831,8 +856,81 @@ namespace TraitExt
         // This is what lets traits reach sections the lists never cover —
         // weapons, warheads, projectiles — since YR has no master list for them
         // (they exist only as sections referenced by name).
+        // Conditional traits are NOT folded statically — they must be judged
+        // per unit against its owner's buildings, or one player's Battle Lab
+        // would upgrade everybody's units.
+        int condClones = 0;
         for (const auto& kv : traits)
         {
+            const TraitDef& def = kv.second;
+            if (def.Requirement.empty())
+                continue;
+
+            for (const auto& want : def.AppliesTo)
+            {
+                if (!pINI->GetSection(want.c_str()))
+                    continue;
+
+                ConditionalTrait ct;
+                ct.Def = &def;
+                ct.Requirement = def.Requirement;
+
+                // If it changes the look, it needs a clone type just like a
+                // random variant does.
+                for (const auto& e : def.Entries)
+                {
+                    if (_stricmp(e.first.c_str(), "Image") != 0)
+                        continue;
+
+                    std::string art = e.second;
+                    for (int hops = 0; hops < 8; ++hops)
+                    {
+                        const std::string nx = ReadKey(pINI, art.c_str(), "Image");
+                        if (nx.empty() || nx == art) break;
+                        art = nx;
+                    }
+
+                    char buf[24];
+                    std::snprintf(buf, sizeof(buf), "%.14s$C%d", want.c_str(), condClones++);
+                    ct.CloneID = buf;
+
+                    pINI->WriteString(ct.CloneID.c_str(), "$Inherits", want.c_str());
+                    pINI->WriteString(ct.CloneID.c_str(), "Image", art.c_str());
+
+                    const auto lit = targetList.find(want);
+                    if (lit != targetList.end())
+                    {
+                        const int n2 = pINI->GetKeyCount(lit->second.c_str());
+                        char idx[16];
+                        std::snprintf(idx, sizeof(idx), "%d", n2);
+                        pINI->WriteString(lit->second.c_str(), idx, ct.CloneID.c_str());
+                    }
+
+                    if (!def.TurretFrom.empty())
+                    {
+                        std::string tart = def.TurretFrom;
+                        for (int hops = 0; hops < 8; ++hops)
+                        {
+                            const std::string nx = ReadKey(pINI, tart.c_str(), "Image");
+                            if (nx.empty() || nx == tart) break;
+                            tart = nx;
+                        }
+                        MixedTurret::Remember(ct.CloneID, tart);
+                    }
+                    break;
+                }
+
+                Conditional::Register(want, ct);
+                Debug::Log("[TraitExt] %s: conditional trait '%s' (needs %s)%s\n",
+                    want.c_str(), def.Name.c_str(), def.Requirement[0].c_str(),
+                    ct.CloneID.empty() ? "" : " [has variant art]");
+            }
+        }
+
+        for (const auto& kv : traits)
+        {
+            if (!kv.second.Requirement.empty())
+                continue;       // handled above, at runtime
             for (const auto& want : kv.second.AppliesTo)
             {
                 if (std::find(targets.begin(), targets.end(), want) != targets.end())
@@ -896,6 +994,8 @@ namespace TraitExt
                 for (const auto& kv : traits)
                 {
                     const TraitDef& def = kv.second;
+                    if (!def.Requirement.empty())
+                        continue;   // gated: applied per unit at runtime, not folded here
                     if (std::find(def.AppliesTo.begin(), def.AppliesTo.end(), target)
                         != def.AppliesTo.end())
                     {
