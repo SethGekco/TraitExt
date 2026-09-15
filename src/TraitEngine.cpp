@@ -1696,6 +1696,31 @@ namespace TraitExt
                 Debug::Log("[TraitExt]   %s.%s: '%s' -> '%s'\n",
                     target.c_str(), key.c_str(), base.c_str(), result.c_str());
 
+                // Setting Primary= on a unit that answers from the WeaponN list
+                // writes cleanly and then does nothing, which reads in the log
+                // as a successful change. The IFV is the worst case: Gunner=yes
+                // with WeaponCount=17, so it picks by PASSENGER and Primary= is
+                // never consulted. Say so rather than let the log look like it
+                // worked.
+                if (!_stricmp(key.c_str(), "Primary") || !_stricmp(key.c_str(), "Secondary"))
+                {
+                    const std::string wc = ReadKey(pINI, target.c_str(), "WeaponCount");
+                    if (!wc.empty() && std::atoi(wc.c_str()) > 0)
+                    {
+                        const std::string g = ReadKey(pINI, target.c_str(), "Gunner");
+                        const bool gunner = !g.empty()
+                            && (g[0] == 'y' || g[0] == 'Y' || g[0] == 't'
+                                || g[0] == 'T' || g[0] == '1');
+                        Debug::Log("[TraitExt]   WARN %s: '%s' was written, but this type "
+                            "is WeaponCount=%s%s, so the engine answers from its "
+                            "Weapon1..N list and IGNORES %s. Set Weapon1= (the "
+                            "default/empty slot) instead.\n",
+                            target.c_str(), key.c_str(), wc.c_str(),
+                            gunner ? " with Gunner=yes (weapon chosen by PASSENGER)" : "",
+                            key.c_str());
+                    }
+                }
+
                 // A changed Image also moves the cameo, since the cameo is read
                 // from the art section ImageFile names. Remember the art section
                 // in use beforehand so the cameo can be put back.

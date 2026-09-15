@@ -109,6 +109,14 @@ match, Instance for per-unit looks.
   `UnitTypeClass` and the draw swap hooks `UnitClass`, so infantry, aircraft and
   buildings cannot change appearance — their other trait keys still apply, and
   TraitExt warns at load.
+* **`Primary=` is ignored by units that define `WeaponCount`.** Those answer
+  from their `Weapon1..N` list instead — and for `Gunner=yes` units (the IFV is
+  `WeaponCount=17`) the slot is chosen by **passenger**, so `Primary=` is never
+  read at all. The write succeeds and the log shows the change, which makes it
+  look like it worked; the unit keeps firing its old gun. Set `Weapon1=` (the
+  default/empty slot) instead. TraitExt now warns at load when a trait sets
+  `Primary=`/`Secondary=` on such a type. The Prism Tank is the same shape:
+  `WeaponCount=1` with `Weapon1=Comet` and `Primary=` commented out.
 * **Gated STATS do not roll back when the gate closes.** Appearance and weapon
   follow the gate both ways, but `Veterancy`/`Health`/`Ammo` are applied when it
   opens and left alone when it shuts — un-applying a fold is not generally
