@@ -852,7 +852,7 @@ namespace TraitExt
                 if (!drawRelevant && IsWeaponKey(k))
                 {
                     VariantWeapon::MarkClone(cloneID);
-                    pINI->WriteString(cloneID.c_str(), k, tartDonor.c_str());
+                    pINI->WriteString(cloneID.c_str(), k, te.second.c_str());
                     continue;
                 }
 
@@ -866,7 +866,7 @@ namespace TraitExt
                     continue;
                 }
 
-                pINI->WriteString(cloneID.c_str(), k, tartDonor.c_str());
+                pINI->WriteString(cloneID.c_str(), k, te.second.c_str());
             }
         }
     }
