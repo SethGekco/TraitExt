@@ -124,17 +124,32 @@ namespace TraitExt
 
     namespace VariantWeapon
     {
-        void MarkClone(const std::string& cloneID) { g_WeaponClones.insert(cloneID); }
+        void MarkClone(const std::string& cloneID)
+        {
+            if (g_WeaponClones.insert(cloneID).second)
+                Debug::Log("[TraitExt]   %s: carries its own weapon(s)\n", cloneID.c_str());
+        }
         bool CloneHasWeapon(const std::string& cloneID)
         {
             return g_WeaponClones.count(cloneID) != 0;
         }
         void Assign(::TechnoClass* pThis, const char* cloneID)
         {
-            if (!pThis || !cloneID || !*cloneID || !g_WeaponClones.count(cloneID))
+            if (!pThis || !cloneID || !*cloneID)
                 return;
-            if (auto* const p = TechnoTypeClass::Find(cloneID))
-                g_VariantWeapon[pThis] = p;
+            if (!g_WeaponClones.count(cloneID))
+                return;     // this variant defines no weapon: keep the base one
+
+            TechnoTypeClass* const p = TechnoTypeClass::Find(cloneID);
+            if (!p)
+            {
+                static std::unordered_set<std::string> s_warned;
+                if (s_warned.insert(cloneID).second)
+                    Debug::Log("[TraitExt] WARN weapon variant '%s' is not a TechnoType\n",
+                        cloneID);
+                return;
+            }
+            g_VariantWeapon[pThis] = p;
         }
         void Forget(::TechnoClass* pThis) { g_VariantWeapon.erase(pThis); }
         bool Any() { return !g_VariantWeapon.empty(); }

@@ -292,7 +292,10 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
                     const int pick = static_cast<int>(CosmeticRand() % static_cast<std::uint32_t>(n));
                     if (!pP->CloneIDs[pick].empty())
                     {
+                        // Morphing must move the WEAPON too, or a unit that
+                        // looks like a Prism Tank keeps firing shells.
                         TraitExt::VariantArt::Assign(pThis, pP->CloneIDs[pick].c_str());
+                        TraitExt::VariantWeapon::Assign(pThis, pP->CloneIDs[pick].c_str());
                         break;
                     }
                 }
