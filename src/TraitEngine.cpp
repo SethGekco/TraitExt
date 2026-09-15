@@ -716,6 +716,161 @@ namespace TraitExt
         }
     }
 
+    namespace
+    {
+        // Everything a synthesised clone type needs beyond $Inherits+Image.
+        // Shared by the random-pool path and the prerequisite-gated path: it
+        // used to live only in the former, which is why a gated Battle
+        // Fortress FV changed its image but kept its old turret and weapon.
+        void FurnishClone(CCINIClass* pINI, const std::string& cloneID,
+            const TraitDef& def, const std::string& artDonor,
+            const std::string& target)
+        {
+            // Turret presence must agree with the borrowed art.
+            // The clone inherits the TARGET's Turret= (e.g. the
+            // Grizzly's "yes"), but the art it now wears may have
+            // no turret voxel at all (TNKD is Turret=no, Mirage
+            // has none), which is why bodies changed while
+            // turrets vanished. Adopt the art donor's turret
+            // settings unless the trait states them itself.
+            // Turret rendering is driven by a FAMILY of tags, not
+            // just Turret=. The Prism Tank, for example, is
+            // TurretCount=4 with WeaponCount=1 and picks a turret
+            // voxel by RANGE (Turret.RangeBands /
+            // Turret.RangeIndices) — copying only Turret and
+            // TurretCount left the selector unset, so the body
+            // drew and the turret did not. Inherit the whole
+            // family from the art donor so type and art agree.
+            static const char* const kTurretKeys[] = {
+                "Turret", "TurretCount", "TurretOffset", "UseTurretShadow",
+                "Turret.RangeBands", "Turret.RangeIndices",
+                "TurretNotExportedOnGround", "TurretAnim", "TurretAnimIsVoxel",
+                "TurretAnimX", "TurretAnimY", "TurretAnimZAdjust",
+                "WeaponTurretIndex1", "WeaponTurretIndex2",
+                "WeaponTurretIndex3", "WeaponTurretIndex4",
+            };
+
+            int copied = 0;
+            for (const char* ak : kTurretKeys)
+            {
+                bool traitSpecifies = false;
+                for (const auto& te : def.Entries)
+                {
+                    if (!_stricmp(te.first.c_str(), ak)) { traitSpecifies = true; break; }
+                }
+                if (traitSpecifies)
+                    continue;   // author's own value wins
+
+                const std::string donor = ReadKey(pINI, artDonor.c_str(), ak);
+                if (!donor.empty())
+                {
+                    pINI->WriteString(cloneID.c_str(), ak, donor.c_str());
+                    ++copied;
+                }
+                else if (!_stricmp(ak, "Turret"))
+                {
+                    // Donor has no turret at all: say so
+                    // explicitly rather than inheriting the
+                    // target's "yes" and hunting a voxel that
+                    // does not exist.
+                    pINI->WriteString(cloneID.c_str(), ak, "no");
+                }
+            }
+            Debug::Log("[TraitExt]   %s: inherited %d turret tag(s) from '%s'\n",
+                cloneID.c_str(), copied, artDonor.c_str());
+
+            // Mixed turrets: resolve the turret donor's ART name
+            // the same way the body image is resolved, then have
+            // the clone load that turret art for itself.
+            if (!def.TurretFrom.empty())
+            {
+                std::string tart = def.TurretFrom;
+                for (int hops = 0; hops < 8; ++hops)
+                {
+                    const std::string nx = ReadKey(pINI, tart.c_str(), "Image");
+                    if (nx.empty() || nx == tart) break;
+                    tart = nx;
+                }
+                MixedTurret::Remember(cloneID, tart);
+                Debug::Log("[TraitExt]   %s: turret art from '%s' (resolved '%s')\n",
+                    cloneID.c_str(), def.TurretFrom.c_str(), tart.c_str());
+            }
+
+            // Any other TYPE-level key on the trait belongs on
+            // the clone — that is what makes "change the body
+            // but keep the turret" (or vice versa) expressible.
+            for (const auto& te : def.Entries)
+            {
+                const char* k = te.first.c_str();
+                if (!_stricmp(k, "Image")
+                    || !_stricmp(k, "Health") || !_stricmp(k, "Strength")
+                    || !_stricmp(k, "Veterancy") || !_stricmp(k, "Ammo"))
+                    continue;   // instance-level, applied per unit
+
+                // TraitExt's own key, not a game key — don't
+                // write it into the clone section.
+                if (!_stricmp(k, "ForceBodyFacing"))
+                {
+                    const bool on = !te.second.empty()
+                        && (te.second[0] == 'y' || te.second[0] == 'Y'
+                            || te.second[0] == 't' || te.second[0] == 'T'
+                            || te.second[0] == '1');
+                    VariantArt::SetForceBodyFacing(cloneID, on);
+                    if (on)
+                        Debug::Log("[TraitExt]   %s: must aim with its hull "
+                            "(ForceBodyFacing)\n", cloneID.c_str());
+                    continue;
+                }
+
+                // The clone is swapped in ONLY for the draw, so
+                // only keys the renderer reads can have any
+                // effect. Cost/Armor/Strength/Prerequisite and
+                // friends belong to the real buildable type —
+                // writing them here would look like it works and
+                // silently do nothing (Rex hit exactly this with
+                // Cost). Name the limit instead.
+                static const char* const kDrawKeys[] = {
+                    "Turret", "TurretCount", "TurretOffset", "UseTurretShadow",
+                    "Turret.RangeBands", "Turret.RangeIndices",
+                    "TurretNotExportedOnGround", "TurretAnim", "TurretAnimIsVoxel",
+                    "TurretAnimX", "TurretAnimY", "TurretAnimZAdjust",
+                    "WeaponTurretIndex1", "WeaponTurretIndex2",
+                    "WeaponTurretIndex3", "WeaponTurretIndex4",
+                    "Voxel", "Remapable", "AlphaImage", "Palette",
+                };
+
+                bool drawRelevant = false;
+                for (const char* dk : kDrawKeys)
+                {
+                    if (!_stricmp(k, dk)) { drawRelevant = true; break; }
+                }
+
+                // Weapons ARE answerable per unit, because the
+                // engine asks the instance (TechnoClass::
+                // GetWeapon) rather than the type. Let them onto
+                // the clone and flag it.
+                if (!drawRelevant && IsWeaponKey(k))
+                {
+                    VariantWeapon::MarkClone(cloneID);
+                    pINI->WriteString(cloneID.c_str(), k, tartDonor.c_str());
+                    continue;
+                }
+
+                if (!drawRelevant)
+                {
+                    Debug::Log("[TraitExt]   WARN %s: '%s' has NO EFFECT here — the "
+                        "variant type is swapped in only for DRAWING and for the "
+                        "weapon lookup, so every other gameplay key still comes "
+                        "from [%s]. Apply it as a plain (non-variant) trait.\n",
+                        cloneID.c_str(), k, target.c_str());
+                    continue;
+                }
+
+                pINI->WriteString(cloneID.c_str(), k, tartDonor.c_str());
+            }
+        }
+    }
+
     void Engine::ProcessINI(CCINIClass* pINI)
     {
         if (!pINI)
@@ -980,6 +1135,12 @@ namespace TraitExt
                     pINI->WriteString(ct.CloneID.c_str(), "$Inherits", want.c_str());
                     pINI->WriteString(ct.CloneID.c_str(), "Image", art.c_str());
 
+                    // Same furnishing as a random variant: turret tags that
+                    // match the borrowed art, plus the trait's own draw and
+                    // weapon keys. Without this the unlock changed the image
+                    // and nothing else.
+                    FurnishClone(pINI, ct.CloneID, def, e.second, want);
+
                     const auto lit = targetList.find(want);
                     if (lit != targetList.end())
                     {
@@ -987,18 +1148,6 @@ namespace TraitExt
                         char idx[16];
                         std::snprintf(idx, sizeof(idx), "%d", n2);
                         pINI->WriteString(lit->second.c_str(), idx, ct.CloneID.c_str());
-                    }
-
-                    if (!def.TurretFrom.empty())
-                    {
-                        std::string tart = def.TurretFrom;
-                        for (int hops = 0; hops < 8; ++hops)
-                        {
-                            const std::string nx = ReadKey(pINI, tart.c_str(), "Image");
-                            if (nx.empty() || nx == tart) break;
-                            tart = nx;
-                        }
-                        MixedTurret::Remember(ct.CloneID, tart);
                     }
                     break;
                 }
@@ -1236,148 +1385,7 @@ namespace TraitExt
                             pINI->WriteString(cloneID.c_str(), "$Inherits", target.c_str());
                             pINI->WriteString(cloneID.c_str(), "Image", art.c_str());
 
-                            // Turret presence must agree with the borrowed art.
-                            // The clone inherits the TARGET's Turret= (e.g. the
-                            // Grizzly's "yes"), but the art it now wears may have
-                            // no turret voxel at all (TNKD is Turret=no, Mirage
-                            // has none), which is why bodies changed while
-                            // turrets vanished. Adopt the art donor's turret
-                            // settings unless the trait states them itself.
-                            // Turret rendering is driven by a FAMILY of tags, not
-                            // just Turret=. The Prism Tank, for example, is
-                            // TurretCount=4 with WeaponCount=1 and picks a turret
-                            // voxel by RANGE (Turret.RangeBands /
-                            // Turret.RangeIndices) — copying only Turret and
-                            // TurretCount left the selector unset, so the body
-                            // drew and the turret did not. Inherit the whole
-                            // family from the art donor so type and art agree.
-                            static const char* const kTurretKeys[] = {
-                                "Turret", "TurretCount", "TurretOffset", "UseTurretShadow",
-                                "Turret.RangeBands", "Turret.RangeIndices",
-                                "TurretNotExportedOnGround", "TurretAnim", "TurretAnimIsVoxel",
-                                "TurretAnimX", "TurretAnimY", "TurretAnimZAdjust",
-                                "WeaponTurretIndex1", "WeaponTurretIndex2",
-                                "WeaponTurretIndex3", "WeaponTurretIndex4",
-                            };
-
-                            int copied = 0;
-                            for (const char* ak : kTurretKeys)
-                            {
-                                bool traitSpecifies = false;
-                                for (const auto& te : it->second.Entries)
-                                {
-                                    if (!_stricmp(te.first.c_str(), ak)) { traitSpecifies = true; break; }
-                                }
-                                if (traitSpecifies)
-                                    continue;   // author's own value wins
-
-                                const std::string donor = ReadKey(pINI, e.second.c_str(), ak);
-                                if (!donor.empty())
-                                {
-                                    pINI->WriteString(cloneID.c_str(), ak, donor.c_str());
-                                    ++copied;
-                                }
-                                else if (!_stricmp(ak, "Turret"))
-                                {
-                                    // Donor has no turret at all: say so
-                                    // explicitly rather than inheriting the
-                                    // target's "yes" and hunting a voxel that
-                                    // does not exist.
-                                    pINI->WriteString(cloneID.c_str(), ak, "no");
-                                }
-                            }
-                            Debug::Log("[TraitExt]   %s: inherited %d turret tag(s) from '%s'\n",
-                                cloneID.c_str(), copied, e.second.c_str());
-
-                            // Mixed turrets: resolve the turret donor's ART name
-                            // the same way the body image is resolved, then have
-                            // the clone load that turret art for itself.
-                            if (!it->second.TurretFrom.empty())
-                            {
-                                std::string tart = it->second.TurretFrom;
-                                for (int hops = 0; hops < 8; ++hops)
-                                {
-                                    const std::string nx = ReadKey(pINI, tart.c_str(), "Image");
-                                    if (nx.empty() || nx == tart) break;
-                                    tart = nx;
-                                }
-                                MixedTurret::Remember(cloneID, tart);
-                                Debug::Log("[TraitExt]   %s: turret art from '%s' (resolved '%s')\n",
-                                    cloneID.c_str(), it->second.TurretFrom.c_str(), tart.c_str());
-                            }
-
-                            // Any other TYPE-level key on the trait belongs on
-                            // the clone — that is what makes "change the body
-                            // but keep the turret" (or vice versa) expressible.
-                            for (const auto& te : it->second.Entries)
-                            {
-                                const char* k = te.first.c_str();
-                                if (!_stricmp(k, "Image")
-                                    || !_stricmp(k, "Health") || !_stricmp(k, "Strength")
-                                    || !_stricmp(k, "Veterancy") || !_stricmp(k, "Ammo"))
-                                    continue;   // instance-level, applied per unit
-
-                                // TraitExt's own key, not a game key — don't
-                                // write it into the clone section.
-                                if (!_stricmp(k, "ForceBodyFacing"))
-                                {
-                                    const bool on = !te.second.empty()
-                                        && (te.second[0] == 'y' || te.second[0] == 'Y'
-                                            || te.second[0] == 't' || te.second[0] == 'T'
-                                            || te.second[0] == '1');
-                                    VariantArt::SetForceBodyFacing(cloneID, on);
-                                    if (on)
-                                        Debug::Log("[TraitExt]   %s: must aim with its hull "
-                                            "(ForceBodyFacing)\n", cloneID.c_str());
-                                    continue;
-                                }
-
-                                // The clone is swapped in ONLY for the draw, so
-                                // only keys the renderer reads can have any
-                                // effect. Cost/Armor/Strength/Prerequisite and
-                                // friends belong to the real buildable type —
-                                // writing them here would look like it works and
-                                // silently do nothing (Rex hit exactly this with
-                                // Cost). Name the limit instead.
-                                static const char* const kDrawKeys[] = {
-                                    "Turret", "TurretCount", "TurretOffset", "UseTurretShadow",
-                                    "Turret.RangeBands", "Turret.RangeIndices",
-                                    "TurretNotExportedOnGround", "TurretAnim", "TurretAnimIsVoxel",
-                                    "TurretAnimX", "TurretAnimY", "TurretAnimZAdjust",
-                                    "WeaponTurretIndex1", "WeaponTurretIndex2",
-                                    "WeaponTurretIndex3", "WeaponTurretIndex4",
-                                    "Voxel", "Remapable", "AlphaImage", "Palette",
-                                };
-
-                                bool drawRelevant = false;
-                                for (const char* dk : kDrawKeys)
-                                {
-                                    if (!_stricmp(k, dk)) { drawRelevant = true; break; }
-                                }
-
-                                // Weapons ARE answerable per unit, because the
-                                // engine asks the instance (TechnoClass::
-                                // GetWeapon) rather than the type. Let them onto
-                                // the clone and flag it.
-                                if (!drawRelevant && IsWeaponKey(k))
-                                {
-                                    VariantWeapon::MarkClone(cloneID);
-                                    pINI->WriteString(cloneID.c_str(), k, te.second.c_str());
-                                    continue;
-                                }
-
-                                if (!drawRelevant)
-                                {
-                                    Debug::Log("[TraitExt]   WARN %s: '%s' has NO EFFECT in "
-                                        "TraitsRandomScope=Instance — the variant is used only "
-                                        "for drawing, so gameplay keys still come from [%s]. "
-                                        "Use TraitsRandomScope=Type for it.\n",
-                                        cloneID.c_str(), k, target.c_str());
-                                    continue;
-                                }
-
-                                pINI->WriteString(cloneID.c_str(), k, te.second.c_str());
-                            }
+                            FurnishClone(pINI, cloneID, it->second, e.second, target);
 
                             const auto lit = targetList.find(target);
                             if (lit == targetList.end())
