@@ -24,6 +24,21 @@ below (which are consumed by TraitExt and never written to targets).
 | `RerollInterval=` | morph cadence in frames, `N` or `min,max` |
 | `TurretFrom=` | take turret + barrel art from another unit (mixed turrets) |
 | `ForceBodyFacing=` | unit must rotate its hull to fire, like a turretless tank |
+| `Requirement=` | the unit's OWNER must have all of these present |
+| `NearTypes=` | applies only while one of these stands within `NearRange` |
+| `NearRange=` | proximity radius in **cells** (required by `NearTypes`) |
+| `NearOwner=` | whose objects count: `Owner` (default), `Ally`, `Enemy`, `Any` |
+
+`Requirement=` and `NearTypes=` can be combined — both must hold. Either alone
+is fine too.
+
+```ini
+[T_Escort]                  ; veteran only while it stays near a Battle Fortress
+AppliesTo=FV
+NearTypes=BFRT
+NearRange=6
+Veterancy=2.0
+```
 
 Value sigils: `Strength=+200` forces `Add`, `Cost=*0.75` forces `Multiply`.
 
@@ -94,5 +109,11 @@ match, Instance for per-unit looks.
   `UnitTypeClass` and the draw swap hooks `UnitClass`, so infantry, aircraft and
   buildings cannot change appearance — their other trait keys still apply, and
   TraitExt warns at load.
+* **Gated STATS do not roll back when the gate closes.** Appearance and weapon
+  follow the gate both ways, but `Veterancy`/`Health`/`Ammo` are applied when it
+  opens and left alone when it shuts — un-applying a fold is not generally
+  possible. So a unit that drives out of a `NearTypes=` radius keeps the
+  veterancy it gained. Use proximity gates for looks and weapons; treat any stat
+  bonus from one as permanent.
 * **Cameos come from `artmd.ini`**, which TraitExt does not process, so a cameo
   cannot be set directly — only inherited via `Image=` (or kept, the default).
