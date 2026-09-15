@@ -56,6 +56,14 @@ namespace TraitExt
         // for the trait to apply. Checked per unit, because type data is shared
         // by every house — a type-level unlock would arm the enemy too.
         std::vector<std::string> Requirement;
+        // Proximity gate: the trait applies only while one of these types is
+        // standing within NearRange CELLS of the unit. Like Requirement it is
+        // judged per unit at runtime — but unlike Requirement it depends on
+        // where the unit currently is, so it opens and closes as it drives.
+        std::vector<std::string> NearTypes;
+        int NearRange = 0;
+        // Whose objects count: Owner (default), Ally, Enemy or Any.
+        std::string NearOwner;
         // Author order is preserved: fold order is declaration order.
         std::vector<std::pair<std::string, std::string>> Entries;
         // Per-key mode overrides from "<Key>.Merge=" inside the trait section.
@@ -173,8 +181,13 @@ namespace TraitExt
     // unit updates when the building goes up or is destroyed.
     struct ConditionalTrait
     {
+        enum class Whose { Owner, Ally, Enemy, Any };
+
         const TraitDef* Def = nullptr;
         std::vector<std::string> Requirement;
+        std::vector<std::string> NearTypes;
+        int NearRange = 0;                  // cells; 0 disables the gate
+        Whose NearOwner = Whose::Owner;
         std::string CloneID;        // empty unless the trait changes appearance
     };
 
@@ -184,6 +197,12 @@ namespace TraitExt
         bool Any();
         void Register(const std::string& targetID, const ConditionalTrait& ct);
         void Clear();
+
+        // Is something this trait watches for currently standing close enough?
+        // Answered from an index rebuilt at most once per check cadence, so the
+        // cost is one walk of TechnoClass::Array rather than one per unit.
+        bool NearMeets(::TechnoClass* pThis, const ConditionalTrait& ct);
+        bool AnyNear();     // true if any registered trait uses a proximity gate
     }
 
     namespace SpyTraits

@@ -5,6 +5,9 @@
 #include <ScenarioClass.h>
 #include <SessionClass.h>
 #include <TechnoTypeClass.h>
+#include <TechnoClass.h>        // proximity gates walk TechnoClass::Array
+#include <HouseClass.h>         // ... and ask it who owns what
+#include <Fundamentals.h>       // Unsorted::CurrentFrame / LeptonsPerCell
 #include <FootClass.h>          // generic_cast needs it complete
 #include <FileSystem.h>
 #include <CCFileClass.h>
@@ -292,6 +295,12 @@ namespace TraitExt
     namespace
     {
         std::unordered_map<std::string, std::vector<ConditionalTrait>> g_Conditional;
+
+        // Every type ID any proximity gate watches for, and the per-frame
+        // snapshot of where those objects currently are.
+        std::unordered_set<std::string> g_NearWatch;
+        std::unordered_map<std::string, std::vector<TechnoClass*>> g_NearIndex;
+        int g_NearIndexFrame = -1;
     }
 
     namespace Conditional
@@ -307,8 +316,92 @@ namespace TraitExt
         void Register(const std::string& targetID, const ConditionalTrait& ct)
         {
             g_Conditional[targetID].push_back(ct);
+            for (const auto& id : ct.NearTypes)
+                g_NearWatch.insert(id);
         }
-        void Clear() { g_Conditional.clear(); }
+        void Clear() { g_Conditional.clear(); g_NearWatch.clear(); g_NearIndex.clear(); }
+
+        bool AnyNear() { return !g_NearWatch.empty(); }
+
+        // The index is a snapshot of every watched object's position, rebuilt on
+        // the same cadence the conditional check itself runs on. Without it each
+        // unit would walk the whole TechnoClass::Array, which is units x technos
+        // of work; with it the walk happens once and each unit only scans the
+        // handful of objects it actually cares about.
+        //
+        // SYNC (encyclopedia/Logic-Frame-Update.md): this feeds gameplay, so the
+        // rebuild iterates TechnoClass::Array in INDEX order — never a hash map
+        // — and distances are integer leptons. Pointer-ordered iteration here is
+        // the classic desync that only shows up after minutes of play.
+        static void RebuildNearIndex()
+        {
+            const int now = Unsorted::CurrentFrame;
+            if (now == g_NearIndexFrame)
+                return;
+            g_NearIndexFrame = now;
+
+            for (auto& kv : g_NearIndex)
+                kv.second.clear();
+
+            for (int i = 0; i < TechnoClass::Array.Count; ++i)
+            {
+                TechnoClass* const pOther = TechnoClass::Array.GetItem(i);
+                if (!pOther || !pOther->IsAlive || pOther->InLimbo)
+                    continue;
+
+                TechnoTypeClass* const pType = pOther->GetTechnoType();
+                if (!pType || !g_NearWatch.count(pType->ID))
+                    continue;
+
+                g_NearIndex[pType->ID].push_back(pOther);
+            }
+        }
+
+        bool NearMeets(::TechnoClass* pThis, const ConditionalTrait& ct)
+        {
+            if (ct.NearTypes.empty())
+                return true;        // no proximity gate on this trait
+            if (!pThis)
+                return false;
+
+            RebuildNearIndex();
+
+            HouseClass* const pOwner = pThis->Owner;
+            const int reach = ct.NearRange * Unsorted::LeptonsPerCell;
+
+            for (const auto& id : ct.NearTypes)
+            {
+                const auto it = g_NearIndex.find(id);
+                if (it == g_NearIndex.end())
+                    continue;
+
+                for (TechnoClass* const pOther : it->second)
+                {
+                    if (pOther == pThis)
+                        continue;   // a unit must not satisfy its own gate
+
+                    HouseClass* const pTheirs = pOther->Owner;
+                    switch (ct.NearOwner)
+                    {
+                    case ConditionalTrait::Whose::Owner:
+                        if (pTheirs != pOwner) continue;
+                        break;
+                    case ConditionalTrait::Whose::Ally:
+                        if (!pOwner || !pOwner->IsAlliedWith(pTheirs)) continue;
+                        break;
+                    case ConditionalTrait::Whose::Enemy:
+                        if (!pOwner || pOwner->IsAlliedWith(pTheirs)) continue;
+                        break;
+                    case ConditionalTrait::Whose::Any:
+                        break;
+                    }
+
+                    if (pThis->DistanceFrom(pOther) <= reach)
+                        return true;
+                }
+            }
+            return false;
+        }
     }
 
     namespace SpyTraits
@@ -929,6 +1022,19 @@ namespace TraitExt
             def.TurretFrom = ReadKey(pINI, name.c_str(), "TurretFrom");
             def.RerollInterval = ReadKey(pINI, name.c_str(), "RerollInterval");
             def.Requirement = SplitCSV(ReadKey(pINI, name.c_str(), "Requirement"));
+            def.NearTypes = SplitCSV(ReadKey(pINI, name.c_str(), "NearTypes"));
+            def.NearOwner = ReadKey(pINI, name.c_str(), "NearOwner");
+            {
+                const std::string r = ReadKey(pINI, name.c_str(), "NearRange");
+                def.NearRange = r.empty() ? 0 : std::atoi(r.c_str());
+                if (!def.NearTypes.empty() && def.NearRange <= 0)
+                {
+                    // Defaulting silently would look like a gate that never opens.
+                    def.NearRange = 5;
+                    Debug::Log("[TraitExt] WARN trait '%s': NearTypes needs NearRange "
+                        "(in cells); assuming %d\n", name.c_str(), def.NearRange);
+                }
+            }
 
             const int keyCount = pINI->GetKeyCount(name.c_str());
             for (int i = 0; i < keyCount; ++i)
@@ -945,7 +1051,10 @@ namespace TraitExt
                     || !std::strcmp(keyName, "RandomScope")
                     || !std::strcmp(keyName, "TurretFrom")
                     || !std::strcmp(keyName, "RerollInterval")
-                    || !std::strcmp(keyName, "Requirement"))
+                    || !std::strcmp(keyName, "Requirement")
+                    || !std::strcmp(keyName, "NearTypes")
+                    || !std::strcmp(keyName, "NearRange")
+                    || !std::strcmp(keyName, "NearOwner"))
                     continue;
                 if (keyName[0] == '$')
                     continue; // leave $Inherits and friends to Phobos
@@ -1092,7 +1201,10 @@ namespace TraitExt
         for (const auto& kv : traits)
         {
             const TraitDef& def = kv.second;
-            if (def.Requirement.empty())
+            // A proximity gate is a conditional too, and may stand alone: a
+            // trait can be "while near a Battle Fortress" with no house-wide
+            // prerequisite at all.
+            if (def.Requirement.empty() && def.NearTypes.empty())
                 continue;
 
             for (const auto& want : def.AppliesTo)
@@ -1103,6 +1215,14 @@ namespace TraitExt
                 ConditionalTrait ct;
                 ct.Def = &def;
                 ct.Requirement = def.Requirement;
+                ct.NearTypes = def.NearTypes;
+                ct.NearRange = def.NearRange;
+                if (!_stricmp(def.NearOwner.c_str(), "Ally"))
+                    ct.NearOwner = ConditionalTrait::Whose::Ally;
+                else if (!_stricmp(def.NearOwner.c_str(), "Enemy"))
+                    ct.NearOwner = ConditionalTrait::Whose::Enemy;
+                else if (!_stricmp(def.NearOwner.c_str(), "Any"))
+                    ct.NearOwner = ConditionalTrait::Whose::Any;
 
                 // If it changes the look, it needs a clone type just like a
                 // random variant does.
@@ -1153,8 +1273,13 @@ namespace TraitExt
                 }
 
                 Conditional::Register(want, ct);
-                Debug::Log("[TraitExt] %s: conditional trait '%s' (needs %s)%s\n",
-                    want.c_str(), def.Name.c_str(), def.Requirement[0].c_str(),
+                // Requirement may now be empty (a proximity-only gate), so this
+                // can no longer index it blindly.
+                Debug::Log("[TraitExt] %s: conditional trait '%s' (needs %s%s%s)%s\n",
+                    want.c_str(), def.Name.c_str(),
+                    def.Requirement.empty() ? "-" : def.Requirement[0].c_str(),
+                    def.NearTypes.empty() ? "" : ", near ",
+                    def.NearTypes.empty() ? "" : def.NearTypes[0].c_str(),
                     ct.CloneID.empty() ? "" : " [has variant art]");
             }
         }

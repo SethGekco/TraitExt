@@ -195,7 +195,11 @@ namespace
         unsigned mask = 0;
         for (size_t i = 0; i < pList->size() && i < 32; ++i)
         {
-            if (OwnerMeets(pThis, (*pList)[i].Requirement))
+            // Both gates must hold: "I have a Battle Lab" AND "I am standing
+            // next to one of these". Either half may be absent, in which case
+            // it does not constrain.
+            if (OwnerMeets(pThis, (*pList)[i].Requirement)
+                && TraitExt::Conditional::NearMeets(pThis, (*pList)[i]))
                 mask |= (1u << i);
         }
 
@@ -236,9 +240,15 @@ namespace
         }
 
         // Gate closed and nothing else claims the look: back to the base type.
+        // The weapon must follow the SAME condition — forgetting it
+        // unconditionally here threw away the variant weapon that was just
+        // assigned a few lines above, so an unlocked unit changed its image
+        // and kept firing its old primary.
         if (!tookLook && mask == 0)
+        {
             TraitExt::VariantArt::Forget(pThis);
-        TraitExt::VariantWeapon::Forget(pThis);
+            TraitExt::VariantWeapon::Forget(pThis);
+        }
     }
 }
 
