@@ -974,14 +974,17 @@ namespace TraitExt
         // trait's own Entries, so the existing fold, clone and gate machinery
         // all work unchanged - there is no new runtime path.
         //
-        // Two things make this more than a key-copy loop:
+        // A donor takes EVERYTHING it defines, including name, cost and
+        // buildability. That is deliberate: the donor is data, so the way to not
+        // inherit a key is to leave it out of the donor section. Filtering in
+        // code would only duplicate a decision the INI already expresses. Where
+        // a donor IS a real unit and some keys are unwanted, InheritExcept= (per
+        // trait) and [TraitExt] InheritExcept= (global default) take key names
+        // or family names.
         //
-        // 1. IDENTITY IS NOT AN ATTRIBUTE. A unit section carries its name,
-        //    price and buildability alongside its stats. Copying those makes the
-        //    target a duplicate of the donor rather than a variant of itself, so
-        //    they are excluded unless asked for by name.
+        // What genuinely cannot be left to the data:
         //
-        // 2. TAGS COME IN FAMILIES. Half a family is worse than none: copying
+        //    TAGS COME IN FAMILIES. Half a family is worse than none: copying
         //    Turret= without Turret.RangeBands= drew a body with no turret, and
         //    inheriting Primary= onto a Gunner/WeaponCount unit did nothing at
         //    all because that unit answers from its Weapon1..N list. Both cost a
@@ -1069,14 +1072,10 @@ namespace TraitExt
             return false;
         }
 
-        bool IsExcludedByDefault(const char* key)
-        {
-            // By name, not index — reordering kFamilies must not silently
-            // change which keys are protected.
-            const KeyFamily* const id = FindFamily("Identity");
-            const KeyFamily* const ec = FindFamily("Economy");
-            return (id && FamilyHasKey(*id, key)) || (ec && FamilyHasKey(*ec, key));
-        }
+        // Applied to every InheritFrom unless the trait says otherwise, from
+        // [TraitExt] InheritExcept=. Empty by default: a donor type is data, so
+        // the way to not inherit a key is to not put it in the donor.
+        std::vector<std::string> g_InheritExceptDefault;
 
         // Resolve the ART SECTION a type actually draws from: its own Image= if
         // it redirects, else its own ID. [SREF] does NOT contain "Image=SREF",
@@ -1144,12 +1143,8 @@ namespace TraitExt
                             if (!ListNamesKey(def.InheritOnly, key))
                                 continue;
                         }
-                        else if (IsExcludedByDefault(key))
-                        {
-                            ++skipped;
-                            continue;
-                        }
-                        if (ListNamesKey(def.InheritExcept, key))
+                        if (ListNamesKey(def.InheritExcept, key)
+                            || ListNamesKey(g_InheritExceptDefault, key))
                         {
                             ++skipped;
                             continue;
@@ -1165,6 +1160,7 @@ namespace TraitExt
                     // Art was filtered out or the author set Image themselves.
                     const bool wantArt = def.InheritOnly.empty()
                         ? !ListNamesKey(def.InheritExcept, "Image")
+                            && !ListNamesKey(g_InheritExceptDefault, "Image")
                         : ListNamesKey(def.InheritOnly, "Image");
                     if (wantArt && !own.count("image"))
                     {
@@ -1177,7 +1173,7 @@ namespace TraitExt
                     }
 
                     Debug::Log("[TraitExt] trait '%s': inherited %d key(s) from '%s' "
-                        "(%d skipped as identity/economy)\n",
+                        "(%d excluded)\n",
                         def.Name.c_str(), took, donor.c_str(), skipped);
                 }
 
@@ -1265,6 +1261,7 @@ namespace TraitExt
         VariantArt::SetEnabled(ReadKey(pINI, SectConfig, "VariantArt", "yes")[0] != 'n');
         MixedTurret::SetEnabled(ReadKey(pINI, SectConfig, "MixedTurrets", "yes")[0] != 'n');
         g_MixedTurrets.clear();
+        g_InheritExceptDefault = SplitCSV(ReadKey(pINI, SectConfig, "InheritExcept"));
         g_WeaponClones.clear();
         VariantWeapon::SetEnabled(ReadKey(pINI, SectConfig, "VariantWeapons", "yes")[0] != 'n');
         Conditional::Clear();

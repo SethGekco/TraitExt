@@ -24,8 +24,25 @@ below (which are consumed by TraitExt and never written to targets).
 | `RerollInterval=` | morph cadence in frames, `N` or `min,max` |
 | `InheritFrom=` | copy a whole TechnoType's tags into this trait (see below) |
 | `InheritOnly=` | restrict the copy to these keys **or families** |
-| `InheritExcept=` | drop these keys **or families** from the copy |
+| `InheritExcept=` | drop these keys **or families** from the copy (adds to the global `[TraitExt] InheritExcept=`) |
 | `TurretFrom=` | take turret + barrel art from another unit (mixed turrets) |
+
+| `ForceBodyFacing=` | unit must rotate its hull to fire, like a turretless tank |
+| `Requirement=` | the unit's OWNER must have all of these present |
+| `NearTypes=` | applies only while one of these stands within `NearRange` |
+| `NearRange=` | proximity radius in **cells** (required by `NearTypes`) |
+| `NearOwner=` | whose objects count: `Owner` (default), `Ally`, `Enemy`, `Any` |
+
+`Requirement=` and `NearTypes=` can be combined — both must hold. Either alone
+is fine too.
+
+```ini
+[T_Escort]                  ; veteran only while it stays near a Battle Fortress
+AppliesTo=FV
+NearTypes=BFRT
+NearRange=6
+Veterancy=2.0
+```
 
 ### Applying a whole unit — `InheritFrom=`
 
@@ -37,13 +54,29 @@ AppliesTo=BFRT
 InheritFrom=HTNK        ; Battle Fortress becomes an Apocalypse
 ```
 
-It copies what the donor section defines, plus its look (the art name is
-synthesised — `[SREF]` does not contain `Image=SREF`). Two deliberate rules:
+It copies **everything** the donor section defines — including `UIName`, `Cost`,
+`Prerequisite` and `Owner` — plus its look (the art name is synthesised, since
+`[SREF]` does not contain `Image=SREF`).
 
-* **Identity and economy are NOT copied by default.** `UIName`, `Cost`,
-  `Prerequisite`, `Owner`, `TechLevel` and friends say *which unit this is*, so
-  copying them makes the target a duplicate rather than a variant. It keeps its
-  own name, price and build requirements. Ask for them by name to override.
+Taking everything is deliberate: the donor is data, so the way to not inherit a
+key is to leave it out of the donor. Point `InheritFrom=` at a **dummy type**
+that lists only what you want and nothing is filtered in code behind your back.
+When the donor is a real unit and some keys are unwanted, exclude them:
+
+```ini
+[TraitExt]
+InheritExcept=Identity,Economy   ; global default for every InheritFrom
+```
+
+```ini
+[T_BecomeApoc]
+AppliesTo=BFRT
+InheritFrom=HTNK
+InheritExcept=Cost,UIName        ; this trait only; adds to the global list
+```
+
+One rule is NOT left to the data, because no INI can express it:
+
 * **Tag families move together, and an unused family gets switched off.** If the
   donor has no turret, the target is written `Turret=no` rather than keeping its
   own `Turret=yes` and hunting a voxel that doesn't exist. If the donor has no
@@ -62,23 +95,6 @@ InheritOnly=Weapons,Turret   ; the gun and turret only; keep its own body
 
 Your own keys in the trait always beat the inherited ones, and the whole result
 then flows through the normal merge modes, random pools and gates.
-| `ForceBodyFacing=` | unit must rotate its hull to fire, like a turretless tank |
-| `Requirement=` | the unit's OWNER must have all of these present |
-| `NearTypes=` | applies only while one of these stands within `NearRange` |
-| `NearRange=` | proximity radius in **cells** (required by `NearTypes`) |
-| `NearOwner=` | whose objects count: `Owner` (default), `Ally`, `Enemy`, `Any` |
-
-`Requirement=` and `NearTypes=` can be combined — both must hold. Either alone
-is fine too.
-
-```ini
-[T_Escort]                  ; veteran only while it stays near a Battle Fortress
-AppliesTo=FV
-NearTypes=BFRT
-NearRange=6
-Veterancy=2.0
-```
-
 Value sigils: `Strength=+200` forces `Add`, `Cost=*0.75` forces `Multiply`.
 
 ## Declaring on the target instead
@@ -105,6 +121,7 @@ RandomSeed=0            ; 0 = per-match. Non-zero pins a draw for repeatable tes
 KeepOriginalCameo=yes   ; keep the unit's own cameo when Image changes
 VariantArt=yes          ; kill switch for per-unit looks
 MixedTurrets=yes        ; kill switch for TurretFrom
+InheritExcept=          ; keys/families every InheritFrom skips by default
 TargetLists=            ; extra list sections to scan
 
 [TraitTargets]          ; individual sections to treat as targets
