@@ -27,7 +27,6 @@ below (which are consumed by TraitExt and never written to targets).
 | `InheritExcept=` | drop these keys **or families** from the copy (adds to the global `[TraitExt] InheritExcept=`) |
 | `InheritCoherence=` | `no` disables family coherence for this trait (see below) |
 | `TurretFrom=` | take turret + barrel art from another unit (mixed turrets) |
-
 | `ForceBodyFacing=` | unit must rotate its hull to fire, like a turretless tank |
 | `Requirement=` | the unit's OWNER must have all of these present |
 | `NearTypes=` | applies only while one of these stands within `NearRange` |
