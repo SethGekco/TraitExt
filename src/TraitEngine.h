@@ -56,6 +56,10 @@ namespace TraitExt
         // Weapons, Armor, Movement, Economy, Identity).
         std::vector<std::string> InheritOnly;
         std::vector<std::string> InheritExcept;
+        // Per-trait override of [TraitExt] InheritFamilyCoherence. Empty = use
+        // the global. "no" hands the whole result to the data: nothing is
+        // switched off on your behalf.
+        std::string InheritCoherence;
         // Mixed turrets: take the turret (and barrel) art from a DIFFERENT unit
         // than the body. Resolved to an art name at load.
         std::string TurretFrom;

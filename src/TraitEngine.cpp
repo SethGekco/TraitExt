@@ -1076,6 +1076,12 @@ namespace TraitExt
         // [TraitExt] InheritExcept=. Empty by default: a donor type is data, so
         // the way to not inherit a key is to not put it in the donor.
         std::vector<std::string> g_InheritExceptDefault;
+        // Family coherence: switch OFF a family the donor does not use, so the
+        // target's own setting cannot contradict the values just copied. On by
+        // default because the failures it prevents are invisible (a body with
+        // no turret; an inherited Primary= that is never read). Turn it off to
+        // get a literal copy and nothing else.
+        bool g_InheritCoherence = true;
 
         // Resolve the ART SECTION a type actually draws from: its own Image= if
         // it redirects, else its own ID. [SREF] does NOT contain "Image=SREF",
@@ -1180,6 +1186,20 @@ namespace TraitExt
                 if (copied.empty())
                     continue;
 
+                // Per-trait override of the global switch.
+                const bool coherence = def.InheritCoherence.empty()
+                    ? g_InheritCoherence
+                    : (def.InheritCoherence[0] != 'n' && def.InheritCoherence[0] != 'N');
+                if (!coherence)
+                {
+                    Debug::Log("[TraitExt]   %s: family coherence OFF - copying "
+                        "literally, nothing switched off on your behalf\n",
+                        def.Name.c_str());
+                    copied.insert(copied.end(), def.Entries.begin(), def.Entries.end());
+                    def.Entries.swap(copied);
+                    continue;
+                }
+
                 // ---- family coherence ------------------------------------
                 // A donor that does not use a family must TURN THE TARGET'S OFF,
                 // or the target keeps its own setting and silently contradicts
@@ -1262,6 +1282,9 @@ namespace TraitExt
         MixedTurret::SetEnabled(ReadKey(pINI, SectConfig, "MixedTurrets", "yes")[0] != 'n');
         g_MixedTurrets.clear();
         g_InheritExceptDefault = SplitCSV(ReadKey(pINI, SectConfig, "InheritExcept"));
+        g_InheritCoherence =
+            ReadKey(pINI, SectConfig, "InheritFamilyCoherence", "yes")[0] != 'n'
+            && ReadKey(pINI, SectConfig, "InheritFamilyCoherence", "yes")[0] != 'N';
         g_WeaponClones.clear();
         VariantWeapon::SetEnabled(ReadKey(pINI, SectConfig, "VariantWeapons", "yes")[0] != 'n');
         Conditional::Clear();
@@ -1295,6 +1318,7 @@ namespace TraitExt
             def.InheritFrom = SplitCSV(ReadKey(pINI, name.c_str(), "InheritFrom"));
             def.InheritOnly = SplitCSV(ReadKey(pINI, name.c_str(), "InheritOnly"));
             def.InheritExcept = SplitCSV(ReadKey(pINI, name.c_str(), "InheritExcept"));
+            def.InheritCoherence = ReadKey(pINI, name.c_str(), "InheritCoherence");
             def.NearTypes = SplitCSV(ReadKey(pINI, name.c_str(), "NearTypes"));
             def.NearOwner = ReadKey(pINI, name.c_str(), "NearOwner");
             {
@@ -1328,6 +1352,7 @@ namespace TraitExt
                     || !std::strcmp(keyName, "InheritFrom")
                     || !std::strcmp(keyName, "InheritOnly")
                     || !std::strcmp(keyName, "InheritExcept")
+                    || !std::strcmp(keyName, "InheritCoherence")
                     || !std::strcmp(keyName, "NearTypes")
                     || !std::strcmp(keyName, "NearRange")
                     || !std::strcmp(keyName, "NearOwner"))
@@ -1983,10 +2008,26 @@ namespace TraitExt
                 // with WeaponCount=17, so it picks by PASSENGER and Primary= is
                 // never consulted. Say so rather than let the log look like it
                 // worked.
-                if (!_stricmp(key.c_str(), "Primary") || !_stricmp(key.c_str(), "Secondary"))
+                if (IsWeaponKey(key.c_str()))
                 {
                     const std::string wc = ReadKey(pINI, target.c_str(), "WeaponCount");
-                    if (!wc.empty() && std::atoi(wc.c_str()) > 0)
+                    const std::string gn = ReadKey(pINI, target.c_str(), "Gunner");
+
+                    // Unconditional, because "the weapon key was written and
+                    // nothing changed in game" is otherwise undiagnosable from
+                    // the log: state which selector this type actually uses.
+                    Debug::Log("[TraitExt]   %s weapon selector: WeaponCount='%s' "
+                        "Gunner='%s' Weapon1='%s' Primary='%s'\n",
+                        target.c_str(),
+                        wc.empty() ? "(unset)" : wc.c_str(),
+                        gn.empty() ? "(unset)" : gn.c_str(),
+                        ReadKey(pINI, target.c_str(), "Weapon1", "(unset)").c_str(),
+                        ReadKey(pINI, target.c_str(), "Primary", "(unset)").c_str());
+
+                    const bool listDriven = !wc.empty() && std::atoi(wc.c_str()) > 0;
+                    if (listDriven
+                        && (!_stricmp(key.c_str(), "Primary")
+                            || !_stricmp(key.c_str(), "Secondary")))
                     {
                         const std::string g = ReadKey(pINI, target.c_str(), "Gunner");
                         const bool gunner = !g.empty()

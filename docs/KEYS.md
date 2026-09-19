@@ -25,6 +25,7 @@ below (which are consumed by TraitExt and never written to targets).
 | `InheritFrom=` | copy a whole TechnoType's tags into this trait (see below) |
 | `InheritOnly=` | restrict the copy to these keys **or families** |
 | `InheritExcept=` | drop these keys **or families** from the copy (adds to the global `[TraitExt] InheritExcept=`) |
+| `InheritCoherence=` | `no` disables family coherence for this trait (see below) |
 | `TurretFrom=` | take turret + barrel art from another unit (mixed turrets) |
 
 | `ForceBodyFacing=` | unit must rotate its hull to fire, like a turretless tank |
@@ -75,13 +76,26 @@ InheritFrom=HTNK
 InheritExcept=Cost,UIName        ; this trait only; adds to the global list
 ```
 
-One rule is NOT left to the data, because no INI can express it:
+One behaviour is not a plain copy, because no INI can express it:
 
 * **Tag families move together, and an unused family gets switched off.** If the
   donor has no turret, the target is written `Turret=no` rather than keeping its
   own `Turret=yes` and hunting a voxel that doesn't exist. If the donor has no
   `WeaponCount`, the target's `Weapon1..N` list is disabled so the inherited
   `Primary=` is actually read.
+
+This is on by default because both failures are invisible — the unit just looks
+or behaves wrong with nothing in the log. Turn it off for a literal copy:
+
+```ini
+[TraitExt]
+InheritFamilyCoherence=no   ; global
+
+[T_Literal]
+InheritCoherence=no         ; this trait only
+```
+
+With it off nothing is switched off on your behalf, and the log says so.
 
 Families for `InheritOnly=` / `InheritExcept=`: `Art`, `Turret`, `Weapons`,
 `Armor`, `Movement`, `Economy`, `Identity`.
@@ -122,6 +136,7 @@ KeepOriginalCameo=yes   ; keep the unit's own cameo when Image changes
 VariantArt=yes          ; kill switch for per-unit looks
 MixedTurrets=yes        ; kill switch for TurretFrom
 InheritExcept=          ; keys/families every InheritFrom skips by default
+InheritFamilyCoherence=yes ; switch off families the donor doesn't use
 TargetLists=            ; extra list sections to scan
 
 [TraitTargets]          ; individual sections to treat as targets
