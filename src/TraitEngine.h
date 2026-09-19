@@ -47,6 +47,15 @@ namespace TraitExt
         std::vector<std::string> RandomPoolFor;
         // Optional scope for the pools this trait joins ("Type" or "Instance").
         std::string RandomScope;
+        // Donor TechnoTypes to copy wholesale. This is the "apply another unit
+        // to this one" verb: instead of hand-writing every key, name a real (or
+        // dummy) type and take what it defines. Expanded into Entries at load,
+        // BEFORE the trait's own keys, so a hand-written key still wins.
+        std::vector<std::string> InheritFrom;
+        // Narrow the copy. Both accept key names and FAMILY names (Art, Turret,
+        // Weapons, Armor, Movement, Economy, Identity).
+        std::vector<std::string> InheritOnly;
+        std::vector<std::string> InheritExcept;
         // Mixed turrets: take the turret (and barrel) art from a DIFFERENT unit
         // than the body. Resolved to an art name at load.
         std::string TurretFrom;
