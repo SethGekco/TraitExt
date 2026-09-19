@@ -22,7 +22,46 @@ below (which are consumed by TraitExt and never written to targets).
 | `RandomPoolFor=` | targets whose random pool this trait belongs to |
 | `RandomScope=` | `Type` (default) or `Instance` for those pools |
 | `RerollInterval=` | morph cadence in frames, `N` or `min,max` |
+| `InheritFrom=` | copy a whole TechnoType's tags into this trait (see below) |
+| `InheritOnly=` | restrict the copy to these keys **or families** |
+| `InheritExcept=` | drop these keys **or families** from the copy |
 | `TurretFrom=` | take turret + barrel art from another unit (mixed turrets) |
+
+### Applying a whole unit — `InheritFrom=`
+
+Name a donor type instead of hand-writing its keys:
+
+```ini
+[T_BecomeApoc]
+AppliesTo=BFRT
+InheritFrom=HTNK        ; Battle Fortress becomes an Apocalypse
+```
+
+It copies what the donor section defines, plus its look (the art name is
+synthesised — `[SREF]` does not contain `Image=SREF`). Two deliberate rules:
+
+* **Identity and economy are NOT copied by default.** `UIName`, `Cost`,
+  `Prerequisite`, `Owner`, `TechLevel` and friends say *which unit this is*, so
+  copying them makes the target a duplicate rather than a variant. It keeps its
+  own name, price and build requirements. Ask for them by name to override.
+* **Tag families move together, and an unused family gets switched off.** If the
+  donor has no turret, the target is written `Turret=no` rather than keeping its
+  own `Turret=yes` and hunting a voxel that doesn't exist. If the donor has no
+  `WeaponCount`, the target's `Weapon1..N` list is disabled so the inherited
+  `Primary=` is actually read.
+
+Families for `InheritOnly=` / `InheritExcept=`: `Art`, `Turret`, `Weapons`,
+`Armor`, `Movement`, `Economy`, `Identity`.
+
+```ini
+[T_PrismGun]
+AppliesTo=MGTK
+InheritFrom=SREF
+InheritOnly=Weapons,Turret   ; the gun and turret only; keep its own body
+```
+
+Your own keys in the trait always beat the inherited ones, and the whole result
+then flows through the normal merge modes, random pools and gates.
 | `ForceBodyFacing=` | unit must rotate its hull to fire, like a turretless tank |
 | `Requirement=` | the unit's OWNER must have all of these present |
 | `NearTypes=` | applies only while one of these stands within `NearRange` |
