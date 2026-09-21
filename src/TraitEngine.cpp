@@ -1242,8 +1242,39 @@ namespace TraitExt
                     }
                 }
 
-                // Turret: same shape. A donor with no turret must say so, or the
-                // target keeps Turret=yes and hunts a voxel that does not exist.
+                // Turret tags DESCRIBE THE DONOR'S ART. TurretCount=4 plus a
+                // range selector only means anything if you are also wearing
+                // the art that has four turrets. Inheriting the Turret family
+                // WITHOUT the Art family therefore produces a type whose
+                // turret config cannot be satisfied by its own voxels - which
+                // rendered the Mirage Tank as nothing at all, body included.
+                // TurretFrom= is the key that actually expresses "keep my
+                // body, wear their turret".
+                {
+                    bool tookTurretShape = false;
+                    for (const auto& c : copied)
+                    {
+                        if (!_stricmp(c.first.c_str(), "TurretCount")
+                            || !_stricmp(c.first.c_str(), "Turret.RangeBands")
+                            || !_stricmp(c.first.c_str(), "Turret.RangeIndices"))
+                        {
+                            tookTurretShape = true;
+                            break;
+                        }
+                    }
+                    if (tookTurretShape && !haveKey("Image"))
+                    {
+                        Debug::Log("[TraitExt] WARN trait '%s': inherited the Turret "
+                            "family from '%s' but NOT its art, so the target now claims "
+                            "turrets its own voxels do not have - it may render as "
+                            "nothing at all. Add Art to InheritOnly, or use "
+                            "TurretFrom=%s to keep this body and wear that turret.\n",
+                            def.Name.c_str(), firstDonor.c_str(), firstDonor.c_str());
+                    }
+                }
+
+                // A donor with no turret must say so, or the target keeps
+                // Turret=yes and hunts a voxel that does not exist.
                 if (!haveKey("Turret") && !own.count("turret"))
                 {
                     const std::string t = ReadKey(pINI, firstDonor.c_str(), "Turret");
@@ -1980,6 +2011,29 @@ namespace TraitExt
 
             if (resolved.empty())
                 continue;
+
+            // TurretFrom on a plain (non-variant) trait. It used to be honoured
+            // only inside FurnishClone, so it worked on random/gated VARIANTS
+            // and silently did nothing when applied straight to a real type —
+            // which is the obvious way to ask for "keep this body, wear that
+            // turret". The donor art is loaded by the target itself, so there
+            // is no pointer aliasing and nothing can be freed twice.
+            for (const TraitDef* def : resolved)
+            {
+                if (def->TurretFrom.empty())
+                    continue;
+
+                std::string tart = def->TurretFrom;
+                for (int hops = 0; hops < 8; ++hops)
+                {
+                    const std::string nx = ReadKey(pINI, tart.c_str(), "Image");
+                    if (nx.empty() || nx == tart) break;
+                    tart = nx;
+                }
+                MixedTurret::Remember(target, tart);
+                Debug::Log("[TraitExt]   %s: turret art from '%s' (resolved '%s')\n",
+                    target.c_str(), def->TurretFrom.c_str(), tart.c_str());
+            }
 
             // ---- 5. Collect contributions per key, preserving order ---------
             std::vector<std::string> keyOrder;
