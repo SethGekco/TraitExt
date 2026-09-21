@@ -1781,28 +1781,48 @@ namespace TraitExt
                         }
                         ip.Traits.push_back(&it->second);
 
-                        // If this trait sets Image, synthesise a clone type so
-                        // the look really can differ per unit. The clone
-                        // $Inherits the target, so it matches in every other
-                        // respect, and is registered in the same type list.
-                        std::string cloneID;
+                        // A per-unit variant needs a real second type to carry
+                        // the differing values, because Image and the weapon
+                        // arrays both live on the shared TechnoTypeClass. The
+                        // clone $Inherits the target, so it matches in every
+                        // other respect, and is registered in the same list.
+                        //
+                        // TWO reasons to build one, not one: a different LOOK
+                        // (swapped in around the draw) and a different WEAPON
+                        // (answered per instance via TechnoClass::GetWeapon).
+                        // Only art was considered before, so a weapons-only
+                        // trait produced no clone and silently did nothing -
+                        // the same shape of no-op as writing Primary= onto a
+                        // Gunner unit.
+                        std::string artValue;
+                        bool wantsWeapon = false;
                         for (const auto& e : it->second.Entries)
                         {
-                            if (_stricmp(e.first.c_str(), "Image") != 0)
-                                continue;
+                            if (!_stricmp(e.first.c_str(), "Image"))
+                                artValue = e.second;
+                            else if (IsWeaponKey(e.first.c_str()))
+                                wantsWeapon = true;
+                        }
 
-                            if (!artCapable(target))
-                            {
-                                Debug::Log("[TraitExt] WARN %s: trait '%s' sets Image, but "
-                                    "variant art is VEHICLE-ONLY (the draw swap hooks "
-                                    "UnitClass). %s is not a VehicleType, so its look cannot "
-                                    "vary per unit - other keys still apply.\n",
-                                    target.c_str(), n.c_str(), target.c_str());
-                                break;
-                            }
+                        // Art is VEHICLE-ONLY (the draw swap hooks UnitClass);
+                        // weapons are not, because GetWeapon takes the instance
+                        // whatever class it is.
+                        bool wantsArt = !artValue.empty();
+                        if (wantsArt && !artCapable(target))
+                        {
+                            Debug::Log("[TraitExt] WARN %s: trait '%s' sets Image, but "
+                                "variant art is VEHICLE-ONLY (the draw swap hooks "
+                                "UnitClass). %s is not a VehicleType, so its look cannot "
+                                "vary per unit - other keys still apply.\n",
+                                target.c_str(), n.c_str(), target.c_str());
+                            wantsArt = false;
+                        }
 
-                            std::string art = e.second;
-                            for (int hops = 0; hops < 8; ++hops)
+                        std::string cloneID;
+                        if (wantsArt || wantsWeapon)
+                        {
+                            std::string art = artValue;
+                            for (int hops = 0; hops < 8 && !art.empty(); ++hops)
                             {
                                 const std::string nx = ReadKey(pINI, art.c_str(), "Image");
                                 if (nx.empty() || nx == art) break;
@@ -1814,9 +1834,13 @@ namespace TraitExt
                             cloneID = buf;
 
                             pINI->WriteString(cloneID.c_str(), "$Inherits", target.c_str());
-                            pINI->WriteString(cloneID.c_str(), "Image", art.c_str());
+                            if (wantsArt)
+                                pINI->WriteString(cloneID.c_str(), "Image", art.c_str());
 
-                            FurnishClone(pINI, cloneID, it->second, e.second, target);
+                            // artValue is the turret donor; empty for a
+                            // weapons-only variant, which keeps its own turret.
+                            FurnishClone(pINI, cloneID, it->second,
+                                wantsArt ? artValue : target, target);
 
                             const auto lit = targetList.find(target);
                             if (lit == targetList.end())
@@ -1832,12 +1856,13 @@ namespace TraitExt
                                 std::snprintf(idx, sizeof(idx), "%d", n2);
                                 pINI->WriteString(lit->second.c_str(), idx, cloneID.c_str());
 
-                                Debug::Log("[TraitExt] %s: variant '%s' (Image=%s) for '%s' "
+                                Debug::Log("[TraitExt] %s: variant '%s' (%s%s) for '%s' "
                                     "-> [%s] %s=%s\n",
-                                    target.c_str(), cloneID.c_str(), art.c_str(), n.c_str(),
+                                    target.c_str(), cloneID.c_str(),
+                                    wantsArt ? "Image=" : "weapons only",
+                                    wantsArt ? art.c_str() : "", n.c_str(),
                                     lit->second.c_str(), idx, cloneID.c_str());
                             }
-                            break;
                         }
                         ip.CloneIDs.push_back(cloneID);
                     }
