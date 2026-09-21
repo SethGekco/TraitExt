@@ -152,13 +152,19 @@ in for the draw** versus everything else.
 | When | once at load, whole type shares it | per unit, at its first tick |
 | Cost / UIName / Prerequisite | ✅ | ❌ charged against the shared buildable |
 | Armor / Speed / ROT / max Strength | ✅ | ❌ read outside the draw |
-| Weapons (`Primary=`, `ROF=`, …) | ✅ | ❌ (would need the swap extended to the fire path) |
+| Weapons (`Primary=`, `Weapon1=`, …) | ✅ one draw shared by the whole type | ✅ per unit, via `TechnoClass::GetWeapon` |
 | Body art, turret art, barrels | ✅ | ✅ |
 | Health, Veterancy, Ammo | ✅ | ✅ genuine per-instance fields |
 | Mid-match morph | — | ✅ appearance only |
 
 Both scopes can run on the same unit: Type for the price and stats that vary per
 match, Instance for per-unit looks.
+
+**Type scope draws ONCE per match.** A `RandomScope=Type` weapon pool gives every
+unit of that type the same weapon for the whole game (it varies between matches,
+not within one). For a mixed group, use `RandomScope=Instance` — each unit draws
+its own. Don't point both a Type and an Instance pool at the same unit; they
+fight over it.
 
 ## Things that will bite
 
