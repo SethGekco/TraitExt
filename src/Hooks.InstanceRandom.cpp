@@ -555,6 +555,24 @@ namespace
                 pThis->Type ? pThis->Type->ID : "?", it->second->ID);
         }
 
+        // NEVER swap in a type with no loaded voxel. DrawAsVXL divides through
+        // [HVA+8], so a null HVA is not a missing-art no-op - it is an integer
+        // divide fault that takes the game down on the unit's first frame.
+        // A variant clone whose Image resolves to nothing (or to its own
+        // synthesised ID, which is never a real art section) lands here.
+        // Refusing the swap costs the variant its look and keeps the match
+        // alive, which is the right trade every time.
+        if (!it->second->MainVoxel.HVA)
+        {
+            static std::unordered_set<const void*> s_warned;
+            if (s_warned.insert(it->second).second)
+                Debug::Log("[TraitExt] WARN variant '%s' has no loaded voxel art "
+                    "(Image= names a section with no .vxl/.hva) - refusing the draw "
+                    "swap; the unit keeps its own look. Drawing it would divide by a "
+                    "null HVA and crash.\n", it->second->ID);
+            return;
+        }
+
         g_Swapped = pThis;
         g_SwappedOriginal = pThis->Type;
         pThis->Type = it->second;

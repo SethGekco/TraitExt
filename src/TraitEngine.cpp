@@ -1099,6 +1099,15 @@ namespace TraitExt
             return art;
         }
 
+        // A gate makes a trait RUNTIME-ONLY. This must agree with the
+        // registration test, or the trait is both registered as a gate AND
+        // folded in permanently - which is exactly what made a proximity
+        // Grizzly a Prism Tank with no Pillbox anywhere near it.
+        bool IsGated(const TraitDef& def)
+        {
+            return !def.Requirement.empty() || !def.NearTypes.empty();
+        }
+
         void ExpandInheritFrom(CCINIClass* pINI,
             std::unordered_map<std::string, TraitDef>& traits)
         {
@@ -1510,7 +1519,7 @@ namespace TraitExt
             // A proximity gate is a conditional too, and may stand alone: a
             // trait can be "while near a Battle Fortress" with no house-wide
             // prerequisite at all.
-            if (def.Requirement.empty() && def.NearTypes.empty())
+            if (!IsGated(def))
                 continue;
 
             for (const auto& want : def.AppliesTo)
@@ -1592,7 +1601,7 @@ namespace TraitExt
 
         for (const auto& kv : traits)
         {
-            if (!kv.second.Requirement.empty())
+            if (IsGated(kv.second))
                 continue;       // handled above, at runtime
             for (const auto& want : kv.second.AppliesTo)
             {
@@ -1657,7 +1666,7 @@ namespace TraitExt
                 for (const auto& kv : traits)
                 {
                     const TraitDef& def = kv.second;
-                    if (!def.Requirement.empty())
+                    if (IsGated(def))
                         continue;   // gated: applied per unit at runtime, not folded here
                     if (std::find(def.AppliesTo.begin(), def.AppliesTo.end(), target)
                         != def.AppliesTo.end())
@@ -1834,8 +1843,20 @@ namespace TraitExt
                             cloneID = buf;
 
                             pINI->WriteString(cloneID.c_str(), "$Inherits", target.c_str());
-                            if (wantsArt)
-                                pINI->WriteString(cloneID.c_str(), "Image", art.c_str());
+
+                            // ALWAYS write Image, even for a weapons-only
+                            // variant. Image= is usually ABSENT from a unit
+                            // section (the engine falls back to the section
+                            // NAME), and $Inherits cannot inherit a key the
+                            // parent does not have - so an Image-less clone
+                            // goes looking for "FV$1.vxl", loads with null
+                            // voxels, and the first draw divides through
+                            // HVA+8 and takes the game down. A weapons-only
+                            // variant must look exactly like its base, so
+                            // point it at the base's own art explicitly.
+                            if (!wantsArt)
+                                art = ResolveArtName(pINI, target);
+                            pINI->WriteString(cloneID.c_str(), "Image", art.c_str());
 
                             // artValue is the turret donor; empty for a
                             // weapons-only variant, which keeps its own turret.
