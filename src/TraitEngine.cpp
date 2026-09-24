@@ -931,9 +931,16 @@ namespace TraitExt
                 }
             } s_dump{ pINI, cloneID };
 
+            std::string gavePrimary, gaveSecondary;
+            bool gaveWeaponN = false;
+
             for (const auto& te : def.Entries)
             {
                 const char* k = te.first.c_str();
+                if (!_stricmp(k, "Primary"))        gavePrimary = te.second;
+                else if (!_stricmp(k, "Secondary")) gaveSecondary = te.second;
+                else if (!_strnicmp(k, "Weapon", 6) && k[6] >= '1' && k[6] <= '9')
+                    gaveWeaponN = true;
                 if (!_stricmp(k, "Image")
                     || !_stricmp(k, "Health") || !_stricmp(k, "Strength")
                     || !_stricmp(k, "Veterancy") || !_stricmp(k, "Ammo"))
@@ -999,6 +1006,41 @@ namespace TraitExt
                 }
 
                 pINI->WriteString(cloneID.c_str(), k, te.second.c_str());
+            }
+
+            // A type whose turret/weapon-count machinery is engaged answers
+            // from its WeaponN list and IGNORES Primary=. A clone that borrows
+            // multi-turret art inherits TurretCount>1 and lands in exactly that
+            // state, so a trait written the obvious way - Primary=Comet - left
+            // EVERY weapon slot null. Verified: the section contained
+            // Primary=Comet and the parsed type still had Weapon[0]=(null).
+            //
+            // Both forms mean the same thing to an author, so translate rather
+            // than make them learn which one this particular variant needs.
+            if (!gavePrimary.empty() && !gaveWeaponN)
+            {
+                const int tc = std::atoi(ReadKey(pINI, cloneID.c_str(), "TurretCount").c_str());
+                const int wc = std::atoi(ReadKey(pINI, cloneID.c_str(), "WeaponCount").c_str());
+                if (tc > 1 || wc > 0)
+                {
+                    pINI->WriteString(cloneID.c_str(), "Weapon1", gavePrimary.c_str());
+                    int need = 1;
+                    if (!gaveSecondary.empty())
+                    {
+                        pINI->WriteString(cloneID.c_str(), "Weapon2", gaveSecondary.c_str());
+                        need = 2;
+                    }
+                    if (wc < need)
+                    {
+                        char buf[8];
+                        std::snprintf(buf, sizeof(buf), "%d", need);
+                        pINI->WriteString(cloneID.c_str(), "WeaponCount", buf);
+                    }
+                    Debug::Log("[TraitExt]   %s: TurretCount=%d/WeaponCount=%d means this "
+                        "type answers from its WeaponN list and IGNORES Primary=, so "
+                        "Primary='%s' was also written as Weapon1\n",
+                        cloneID.c_str(), tc, wc, gavePrimary.c_str());
+                }
             }
         }
     }
