@@ -1616,12 +1616,24 @@ namespace TraitExt
                     FurnishClone(pINI, ct.CloneID, def, e.second, want);
 
                     const auto lit = targetList.find(want);
-                    if (lit != targetList.end())
+                    if (lit == targetList.end())
+                    {
+                        // Unregistered = the type never parses, so every key on
+                        // it is inert. The random path said so and this one did
+                        // not, which made the two indistinguishable in the log.
+                        Debug::Log("[TraitExt] WARN %s: no source list known, gated "
+                            "variant '%s' cannot be registered as a type\n",
+                            want.c_str(), ct.CloneID.c_str());
+                    }
+                    else
                     {
                         const int n2 = pINI->GetKeyCount(lit->second.c_str());
                         char idx[16];
                         std::snprintf(idx, sizeof(idx), "%d", n2);
                         pINI->WriteString(lit->second.c_str(), idx, ct.CloneID.c_str());
+                        Debug::Log("[TraitExt] %s: gated variant '%s' -> [%s] %s=%s\n",
+                            want.c_str(), ct.CloneID.c_str(), lit->second.c_str(),
+                            idx, ct.CloneID.c_str());
                     }
                     break;
                 }

@@ -768,7 +768,38 @@ DEFINE_HOOK(0x70E140, TechnoClass_GetWeapon_Variant, 0x6)
         : &pVariant->Weapon[index];
 
     if (!pWeapon->WeaponType)
+    {
+        // The lookup succeeds and then the slot is empty, which is where this
+        // has been dying. Dump what the variant type ACTUALLY parsed, once per
+        // type, rather than reasoning about what it should contain.
+        static std::unordered_set<const void*> s_dumped;
+        if (s_dumped.insert(pVariant).second)
+        {
+            Debug::Log("[TraitExt] GetWeapon: variant '%s' slot %d is EMPTY "
+                "(elite=%d). WeaponCount=%d TurretCount=%d\n",
+                pVariant->ID, index, pThis->Veterancy.IsElite() ? 1 : 0,
+                pVariant->WeaponCount, pVariant->TurretCount);
+            for (int i = 0; i < 4; ++i)
+            {
+                Debug::Log("[TraitExt]     %s: Weapon[%d]=%s EliteWeapon[%d]=%s\n",
+                    pVariant->ID, i,
+                    pVariant->Weapon[i].WeaponType
+                        ? pVariant->Weapon[i].WeaponType->ID : "(null)",
+                    i,
+                    pVariant->EliteWeapon[i].WeaponType
+                        ? pVariant->EliteWeapon[i].WeaponType->ID : "(null)");
+            }
+            // And the base, for comparison: if the BASE has it and the clone
+            // does not, the clone's own keys never parsed.
+            if (TechnoTypeClass* const pBase = pThis->GetTechnoType())
+                Debug::Log("[TraitExt]     base %s: Weapon[0]=%s WeaponCount=%d\n",
+                    pBase->ID,
+                    pBase->Weapon[0].WeaponType
+                        ? pBase->Weapon[0].WeaponType->ID : "(null)",
+                    pBase->WeaponCount);
+        }
         return 0;   // variant leaves this slot empty: fall back to vanilla
+    }
 
     static bool s_logged = false;
     if (!s_logged)
