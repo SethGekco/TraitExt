@@ -118,7 +118,14 @@ namespace TraitExt
         static const char* const kWeaponKeys[] = {
             "Primary", "Secondary", "ElitePrimary", "EliteSecondary",
             "Weapon1", "Weapon2", "Weapon3", "Weapon4",
+            "Weapon5", "Weapon6", "Weapon7", "Weapon8",
             "EliteWeapon1", "EliteWeapon2", "EliteWeapon3", "EliteWeapon4",
+            "EliteWeapon5", "EliteWeapon6", "EliteWeapon7", "EliteWeapon8",
+            // The SELECTORS belong to the family too. Without them a variant
+            // could carry Weapon1= and still be read through Primary=, or vice
+            // versa - and a clone silently dropped WeaponCount entirely, which
+            // is how "Weapon1= plus WeaponCount=1" could not be expressed.
+            "WeaponCount", "Gunner", "IsGattling",
         };
         for (const char* w : kWeaponKeys)
             if (!_stricmp(k, w))
