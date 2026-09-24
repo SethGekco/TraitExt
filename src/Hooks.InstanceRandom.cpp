@@ -359,7 +359,13 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
         ApplyOneTrait(pThis, pDef, hasClone);
 
         if (hasClone)
+        {
+            // BOTH, or a weapons-only variant is drawn and never armed. This is
+            // the unit's FIRST draw; the morph re-roll and the gated path
+            // already did both, so this was the one path still art-only.
             TraitExt::VariantArt::Assign(pThis, pPool->CloneIDs[chosen].c_str());
+            TraitExt::VariantWeapon::Assign(pThis, pPool->CloneIDs[chosen].c_str());
+        }
     }
 
     return 0;
