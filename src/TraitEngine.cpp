@@ -901,6 +901,29 @@ namespace TraitExt
             // Any other TYPE-level key on the trait belongs on
             // the clone — that is what makes "change the body
             // but keep the turret" (or vice versa) expressible.
+            // Read the finished section back. The GetWeapon dump showed a clone
+            // whose weapon slots were ALL null while its TurretCount parsed
+            // fine - so "we wrote the key" and "the engine used the key" have
+            // to be told apart, and only a read-back separates them.
+            struct SectionDump
+            {
+                CCINIClass* pINI; const std::string& id;
+                ~SectionDump()
+                {
+                    const int n = pINI->GetKeyCount(id.c_str());
+                    std::string all;
+                    for (int i = 0; i < n; ++i)
+                    {
+                        const char* k = pINI->GetKeyName(id.c_str(), i);
+                        if (!k) continue;
+                        if (!all.empty()) all += ' ';
+                        all += k; all += '='; all += ReadKey(pINI, id.c_str(), k);
+                    }
+                    Debug::Log("[TraitExt]   %s SECTION AS WRITTEN (%d keys): %s\n",
+                        id.c_str(), n, all.c_str());
+                }
+            } s_dump{ pINI, cloneID };
+
             for (const auto& te : def.Entries)
             {
                 const char* k = te.first.c_str();
