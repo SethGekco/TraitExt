@@ -888,6 +888,14 @@ namespace TraitExt
                 MixedTurret::Remember(cloneID, tart);
                 Debug::Log("[TraitExt]   %s: turret art from '%s' (resolved '%s')\n",
                     cloneID.c_str(), def.TurretFrom.c_str(), tart.c_str());
+
+                // See the static path: a turret donor implies a turret.
+                bool traitSetsTurret = false;
+                for (const auto& e : def.Entries)
+                    if (!_stricmp(e.first.c_str(), "Turret"))
+                        { traitSetsTurret = true; break; }
+                if (!traitSetsTurret)
+                    pINI->WriteString(cloneID.c_str(), "Turret", "yes");
             }
 
             // Any other TYPE-level key on the trait belongs on
@@ -2033,6 +2041,31 @@ namespace TraitExt
                 MixedTurret::Remember(target, tart);
                 Debug::Log("[TraitExt]   %s: turret art from '%s' (resolved '%s')\n",
                     target.c_str(), def->TurretFrom.c_str(), tart.c_str());
+
+                // A turret donor on a Turret=no type is a contradiction: the
+                // voxels load and the engine never draws them, because the type
+                // says it has no turret. The Mirage Tank is Turret=no, so
+                // "wear the Prism turret" silently produced nothing. Asking
+                // for a turret donor IS asking for a turret.
+                if (g_InheritCoherence)
+                {
+                    bool traitSetsTurret = false;
+                    for (const auto& e : def->Entries)
+                        if (!_stricmp(e.first.c_str(), "Turret"))
+                            { traitSetsTurret = true; break; }
+
+                    const std::string cur = ReadKey(pINI, target.c_str(), "Turret");
+                    const bool hasTurret = !cur.empty()
+                        && (cur[0] == 'y' || cur[0] == 'Y' || cur[0] == 't'
+                            || cur[0] == 'T' || cur[0] == '1');
+                    if (!traitSetsTurret && !hasTurret)
+                    {
+                        pINI->WriteString(target.c_str(), "Turret", "yes");
+                        Debug::Log("[TraitExt]   %s: was Turret=no, so the borrowed "
+                            "turret would never be drawn - setting Turret=yes "
+                            "(InheritFamilyCoherence)\n", target.c_str());
+                    }
+                }
             }
 
             // ---- 5. Collect contributions per key, preserving order ---------

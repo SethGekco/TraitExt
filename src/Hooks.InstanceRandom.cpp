@@ -714,8 +714,33 @@ DEFINE_HOOK(0x70E140, TechnoClass_GetWeapon_Variant, 0x6)
 {
     enum { RetWeapon = 0x70E151 };   // bare `ret 4`
 
-    if (!TraitExt::VariantWeapon::Enabled() || !TraitExt::VariantWeapon::Any())
+    // Proof-of-life BEFORE any gating. "variant weapon ACTIVE" never appearing
+    // could mean the map is empty, the lookup missed, the slot was empty — or
+    // that the game simply does not route weapon selection through this
+    // address, in which case the whole seam is wrong. Those need different
+    // fixes, and only an ungated entry log tells them apart.
+    {
+        static bool s_reached = false;
+        if (!s_reached)
+        {
+            s_reached = true;
+            Debug::Log("[TraitExt] GetWeapon hook REACHED (0x70E140 is on a live path)\n");
+        }
+    }
+
+    if (!TraitExt::VariantWeapon::Enabled())
         return 0;
+
+    if (!TraitExt::VariantWeapon::Any())
+    {
+        static bool s_empty = false;
+        if (!s_empty)
+        {
+            s_empty = true;
+            Debug::Log("[TraitExt] GetWeapon: no unit has a variant weapon assigned yet\n");
+        }
+        return 0;
+    }
 
     GET(TechnoClass*, pThis, ECX);
     GET_STACK(int, index, 0x4);
@@ -726,6 +751,16 @@ DEFINE_HOOK(0x70E140, TechnoClass_GetWeapon_Variant, 0x6)
     TechnoTypeClass* const pVariant = TraitExt::VariantWeapon::For(pThis);
     if (!pVariant)
         return 0;
+
+    {
+        static bool s_matched = false;
+        if (!s_matched)
+        {
+            s_matched = true;
+            Debug::Log("[TraitExt] GetWeapon: first unit matched a variant ('%s'), "
+                "slot %d\n", pVariant->ID, index);
+        }
+    }
 
     // Mirror vanilla's elite selection, just off the variant's arrays.
     WeaponStruct* const pWeapon = pThis->Veterancy.IsElite()
