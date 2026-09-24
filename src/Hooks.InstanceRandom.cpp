@@ -752,14 +752,15 @@ DEFINE_HOOK(0x70E140, TechnoClass_GetWeapon_Variant, 0x6)
     if (!pVariant)
         return 0;
 
+    // Keyed PER VARIANT TYPE, not a single global bool. A one-shot global
+    // probe only ever reports the first type that happens to hit it: MTNK
+    // matched first and made every IFV match invisible, so the log could not
+    // answer "did the FV variant engage" at all.
     {
-        static bool s_matched = false;
-        if (!s_matched)
-        {
-            s_matched = true;
-            Debug::Log("[TraitExt] GetWeapon: first unit matched a variant ('%s'), "
-                "slot %d\n", pVariant->ID, index);
-        }
+        static std::unordered_set<const void*> s_matched;
+        if (s_matched.insert(pVariant).second)
+            Debug::Log("[TraitExt] GetWeapon: '%s' matched a variant, slot %d\n",
+                pVariant->ID, index);
     }
 
     // Mirror vanilla's elite selection, just off the variant's arrays.
@@ -801,12 +802,11 @@ DEFINE_HOOK(0x70E140, TechnoClass_GetWeapon_Variant, 0x6)
         return 0;   // variant leaves this slot empty: fall back to vanilla
     }
 
-    static bool s_logged = false;
-    if (!s_logged)
     {
-        s_logged = true;
-        Debug::Log("[TraitExt] variant weapon ACTIVE: slot %d from '%s'\n",
-            index, pVariant->ID);
+        static std::unordered_set<const void*> s_active;
+        if (s_active.insert(pVariant).second)
+            Debug::Log("[TraitExt] variant weapon ACTIVE: slot %d from '%s' -> %s\n",
+                index, pVariant->ID, pWeapon->WeaponType->ID);
     }
 
     R->EAX(pWeapon);
