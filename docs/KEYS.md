@@ -28,6 +28,7 @@ below (which are consumed by TraitExt and never written to targets).
 | `InheritCoherence=` | `no` disables family coherence for this trait (see below) |
 | `TurretFrom=` | take turret + barrel art from another unit (mixed turrets) |
 | `ForceBodyFacing=` | unit must rotate its hull to fire, like a turretless tank |
+| `ForceWeapon=` | `yes` = this variant's gun beats the slot the engine asks for (see below) |
 | `Requirement=` | the unit's OWNER must have all of these present |
 | `NearTypes=` | applies only while one of these stands within `NearRange` |
 | `NearRange=` | proximity radius in **cells** (required by `NearTypes`) |
@@ -108,6 +109,28 @@ InheritOnly=Weapons,Turret   ; the gun and turret only; keep its own body
 
 Your own keys in the trait always beat the inherited ones, and the whole result
 then flows through the normal merge modes, random pools and gates.
+### `ForceWeapon=` — beating the passenger
+
+A `Gunner=yes` unit (the IFV) picks its weapon slot by **passenger**. A variant
+that declares `Weapon1=Comet` therefore fires the prism beam only while empty —
+board a GI and the engine asks for the GI's slot, which the clone merely
+*inherited*, so the passenger's gun wins.
+
+`ForceWeapon=yes` answers from the variant's own **declared** slot instead, so
+the variant's gun holds regardless of who is aboard:
+
+```ini
+[T_IGun1]
+RandomPoolFor=FV
+RandomScope=Instance
+Weapon1=Comet
+ForceWeapon=yes          ; prism beam even with passengers
+```
+
+Default is `no` (vanilla gunner behaviour untouched); `[TraitExt] ForceWeapon=yes`
+flips the default for every variant. "Declared" means a slot the trait spelled
+out — slots the clone inherited from its base are not the variant's own gun.
+
 Value sigils: `Strength=+200` forces `Add`, `Cost=*0.75` forces `Multiply`.
 
 ## Declaring on the target instead
@@ -136,6 +159,7 @@ VariantArt=yes          ; kill switch for per-unit looks
 MixedTurrets=yes        ; kill switch for TurretFrom
 InheritExcept=          ; keys/families every InheritFrom skips by default
 InheritFamilyCoherence=yes ; switch off families the donor doesn't use
+ForceWeapon=no          ; default for variants: does their gun beat the asked-for slot
 TargetLists=            ; extra list sections to scan
 
 [TraitTargets]          ; individual sections to treat as targets

@@ -60,6 +60,11 @@ namespace TraitExt
         // the global. "no" hands the whole result to the data: nothing is
         // switched off on your behalf.
         std::string InheritCoherence;
+        // Does this variant's weapon beat whatever slot the engine asks for?
+        // A Gunner unit picks its slot by PASSENGER, so without this a variant
+        // IFV reverts to the passenger's gun the moment anyone boards. Empty =
+        // use the [TraitExt] ForceWeapon default.
+        std::string ForceWeapon;
         // Mixed turrets: take the turret (and barrel) art from a DIFFERENT unit
         // than the body. Resolved to an art name at load.
         std::string TurretFrom;
@@ -157,6 +162,14 @@ namespace TraitExt
     namespace VariantWeapon
     {
         void MarkClone(const std::string& cloneID);   // this clone overrides weapons
+        // Which slots the TRAIT actually spelled out, as opposed to the ones the
+        // clone merely inherited from its base. Only the declared ones are
+        // "this variant's own gun".
+        void DeclareSlot(const std::string& cloneID, int index);
+        bool SlotDeclared(const char* cloneID, int index);
+        int FirstDeclaredSlot(const char* cloneID);      // -1 when none
+        void SetForce(const std::string& cloneID, bool on);
+        bool Force(const char* cloneID);
         bool CloneHasWeapon(const std::string& cloneID);
         void Assign(::TechnoClass* pThis, const char* cloneID);
         void Forget(::TechnoClass* pThis);

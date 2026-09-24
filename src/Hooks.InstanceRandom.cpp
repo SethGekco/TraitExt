@@ -769,10 +769,32 @@ DEFINE_HOOK(0x70E140, TechnoClass_GetWeapon_Variant, 0x6)
                 pVariant->ID, index);
     }
 
+    // ForceWeapon: does this variant's own gun beat the slot the engine asked
+    // for? It matters because a Gunner unit picks its slot by PASSENGER — so an
+    // IFV carrying a variant weapon reverts to the passenger's gun the instant
+    // anyone boards, since that slot is one the clone merely INHERITED rather
+    // than one the trait declared. With ForceWeapon=yes we answer from the
+    // variant's own declared slot instead; with it off, the passenger wins and
+    // the vanilla gunner behaviour is untouched.
+    int use = index;
+    if (TraitExt::VariantWeapon::Force(pVariant->ID)
+        && !TraitExt::VariantWeapon::SlotDeclared(pVariant->ID, index))
+    {
+        const int own = TraitExt::VariantWeapon::FirstDeclaredSlot(pVariant->ID);
+        if (own >= 0 && own != index)
+        {
+            use = own;
+            static std::unordered_set<const void*> s_forced;
+            if (s_forced.insert(pVariant).second)
+                Debug::Log("[TraitExt] GetWeapon: '%s' ForceWeapon=yes, answering slot "
+                    "%d from its own declared slot %d\n", pVariant->ID, index, own);
+        }
+    }
+
     // Mirror vanilla's elite selection, just off the variant's arrays.
     WeaponStruct* const pWeapon = pThis->Veterancy.IsElite()
-        ? &pVariant->EliteWeapon[index]
-        : &pVariant->Weapon[index];
+        ? &pVariant->EliteWeapon[use]
+        : &pVariant->Weapon[use];
 
     if (!pWeapon->WeaponType)
     {
@@ -783,8 +805,8 @@ DEFINE_HOOK(0x70E140, TechnoClass_GetWeapon_Variant, 0x6)
         if (s_dumped.insert(pVariant).second)
         {
             Debug::Log("[TraitExt] GetWeapon: variant '%s' slot %d is EMPTY "
-                "(elite=%d). WeaponCount=%d TurretCount=%d\n",
-                pVariant->ID, index, pThis->Veterancy.IsElite() ? 1 : 0,
+                "(asked for %d, elite=%d). WeaponCount=%d TurretCount=%d\n",
+                pVariant->ID, use, index, pThis->Veterancy.IsElite() ? 1 : 0,
                 pVariant->WeaponCount, pVariant->TurretCount);
             for (int i = 0; i < 4; ++i)
             {

@@ -111,6 +111,11 @@ namespace TraitExt
         std::unordered_map<void*, TechnoTypeClass*> g_VariantWeapon;
         std::unordered_set<std::string> g_WeaponClones;
         bool g_VariantWeaponEnabled = true;
+        // Slots the trait spelled out per clone, and whether that clone's own
+        // gun outranks the slot the engine asks for.
+        std::unordered_map<std::string, std::vector<int>> g_DeclaredSlots;
+        std::unordered_map<std::string, bool> g_ForceWeapon;
+        bool g_ForceWeaponDefault = false;
     }
 
     bool IsWeaponKey(const char* k)
@@ -162,6 +167,42 @@ namespace TraitExt
             }
             g_VariantWeapon[pThis] = p;
         }
+        void DeclareSlot(const std::string& cloneID, int index)
+        {
+            if (index < 0)
+                return;
+            auto& v = g_DeclaredSlots[cloneID];
+            if (std::find(v.begin(), v.end(), index) == v.end())
+                v.push_back(index);
+        }
+        bool SlotDeclared(const char* cloneID, int index)
+        {
+            if (!cloneID)
+                return false;
+            const auto it = g_DeclaredSlots.find(cloneID);
+            if (it == g_DeclaredSlots.end())
+                return false;
+            return std::find(it->second.begin(), it->second.end(), index)
+                != it->second.end();
+        }
+        int FirstDeclaredSlot(const char* cloneID)
+        {
+            if (!cloneID)
+                return -1;
+            const auto it = g_DeclaredSlots.find(cloneID);
+            if (it == g_DeclaredSlots.end() || it->second.empty())
+                return -1;
+            return *std::min_element(it->second.begin(), it->second.end());
+        }
+        void SetForce(const std::string& cloneID, bool on) { g_ForceWeapon[cloneID] = on; }
+        bool Force(const char* cloneID)
+        {
+            if (!cloneID)
+                return false;
+            const auto it = g_ForceWeapon.find(cloneID);
+            return it == g_ForceWeapon.end() ? g_ForceWeaponDefault : it->second;
+        }
+
         void Forget(::TechnoClass* pThis) { g_VariantWeapon.erase(pThis); }
         bool Any() { return !g_VariantWeapon.empty(); }
         bool Enabled() { return g_VariantWeaponEnabled; }
@@ -992,6 +1033,25 @@ namespace TraitExt
                 {
                     VariantWeapon::MarkClone(cloneID);
                     pINI->WriteString(cloneID.c_str(), k, te.second.c_str());
+
+                    // Which SLOT did the author actually spell out? Only those
+                    // are "this variant's own gun"; the rest the clone merely
+                    // inherits, and a Gunner unit asking for an inherited slot
+                    // is exactly the passenger case ForceWeapon= decides.
+                    int slot = -1;
+                    if (!_stricmp(k, "Primary") || !_stricmp(k, "ElitePrimary"))
+                        slot = 0;
+                    else if (!_stricmp(k, "Secondary") || !_stricmp(k, "EliteSecondary"))
+                        slot = 1;
+                    else
+                    {
+                        const char* digits = nullptr;
+                        if (!_strnicmp(k, "EliteWeapon", 11)) digits = k + 11;
+                        else if (!_strnicmp(k, "Weapon", 6))  digits = k + 6;
+                        if (digits && *digits >= '1' && *digits <= '9')
+                            slot = std::atoi(digits) - 1;
+                    }
+                    VariantWeapon::DeclareSlot(cloneID, slot);
                     continue;
                 }
 
@@ -1017,6 +1077,12 @@ namespace TraitExt
             //
             // Both forms mean the same thing to an author, so translate rather
             // than make them learn which one this particular variant needs.
+            if (!def.ForceWeapon.empty())
+                VariantWeapon::SetForce(cloneID,
+                    def.ForceWeapon[0] == 'y' || def.ForceWeapon[0] == 'Y'
+                    || def.ForceWeapon[0] == 't' || def.ForceWeapon[0] == 'T'
+                    || def.ForceWeapon[0] == '1');
+
             if (!gavePrimary.empty() && !gaveWeaponN)
             {
                 const int tc = std::atoi(ReadKey(pINI, cloneID.c_str(), "TurretCount").c_str());
@@ -1024,10 +1090,12 @@ namespace TraitExt
                 if (tc > 1 || wc > 0)
                 {
                     pINI->WriteString(cloneID.c_str(), "Weapon1", gavePrimary.c_str());
+                    VariantWeapon::DeclareSlot(cloneID, 0);
                     int need = 1;
                     if (!gaveSecondary.empty())
                     {
                         pINI->WriteString(cloneID.c_str(), "Weapon2", gaveSecondary.c_str());
+                        VariantWeapon::DeclareSlot(cloneID, 1);
                         need = 2;
                     }
                     if (wc < need)
@@ -1402,6 +1470,9 @@ namespace TraitExt
         MixedTurret::SetEnabled(ReadKey(pINI, SectConfig, "MixedTurrets", "yes")[0] != 'n');
         g_MixedTurrets.clear();
         g_InheritExceptDefault = SplitCSV(ReadKey(pINI, SectConfig, "InheritExcept"));
+        g_ForceWeaponDefault =
+            ReadKey(pINI, SectConfig, "ForceWeapon", "no")[0] == 'y'
+            || ReadKey(pINI, SectConfig, "ForceWeapon", "no")[0] == 'Y';
         g_InheritCoherence =
             ReadKey(pINI, SectConfig, "InheritFamilyCoherence", "yes")[0] != 'n'
             && ReadKey(pINI, SectConfig, "InheritFamilyCoherence", "yes")[0] != 'N';
@@ -1439,6 +1510,7 @@ namespace TraitExt
             def.InheritOnly = SplitCSV(ReadKey(pINI, name.c_str(), "InheritOnly"));
             def.InheritExcept = SplitCSV(ReadKey(pINI, name.c_str(), "InheritExcept"));
             def.InheritCoherence = ReadKey(pINI, name.c_str(), "InheritCoherence");
+            def.ForceWeapon = ReadKey(pINI, name.c_str(), "ForceWeapon");
             def.NearTypes = SplitCSV(ReadKey(pINI, name.c_str(), "NearTypes"));
             def.NearOwner = ReadKey(pINI, name.c_str(), "NearOwner");
             {
@@ -1473,6 +1545,7 @@ namespace TraitExt
                     || !std::strcmp(keyName, "InheritOnly")
                     || !std::strcmp(keyName, "InheritExcept")
                     || !std::strcmp(keyName, "InheritCoherence")
+                    || !std::strcmp(keyName, "ForceWeapon")
                     || !std::strcmp(keyName, "NearTypes")
                     || !std::strcmp(keyName, "NearRange")
                     || !std::strcmp(keyName, "NearOwner"))
