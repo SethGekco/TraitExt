@@ -1329,7 +1329,8 @@ namespace TraitExt
         // Grizzly a Prism Tank with no Pillbox anywhere near it.
         bool IsGated(const TraitDef& def)
         {
-            return !def.Requirement.empty() || !def.NearTypes.empty();
+            return !def.Requirement.empty() || !def.NearTypes.empty()
+                || !def.RequirePower.empty();
         }
 
         void ExpandInheritFrom(CCINIClass* pINI,
@@ -1353,7 +1354,33 @@ namespace TraitExt
 
                 std::vector<std::pair<std::string, std::string>> copied;
 
-                for (const auto& donor : def.InheritFrom)
+                // GetKeyName enumerates only keys LITERALLY in the section, so a
+                // donor that is itself built on $Inherits would hand over only
+                // its own overrides - not "the whole section". Walk its parent
+                // chain and enumerate those too, nearest-first so the donor's own
+                // keys still win (the `own` set makes first-seen stick). This is
+                // what makes layered dummy "packages" work as donors.
+                std::vector<std::string> chain;
+                for (const auto& d : def.InheritFrom)
+                    chain.push_back(d);
+                for (size_t ci = 0; ci < chain.size() && chain.size() < 32; ++ci)
+                {
+                    for (const auto& parent : SplitCSV(ReadKey(pINI, chain[ci].c_str(), "$Inherits")))
+                    {
+                        if (parent.empty())
+                            continue;
+                        bool seen = false;
+                        for (const auto& c : chain)
+                            if (!_stricmp(c.c_str(), parent.c_str())) { seen = true; break; }
+                        if (!seen)
+                            chain.push_back(parent);   // bounded: cycles cannot grow it
+                    }
+                }
+                if (chain.size() > def.InheritFrom.size())
+                    Debug::Log("[TraitExt] trait '%s': donor chain is %d section(s) deep "
+                        "($Inherits followed)\n", def.Name.c_str(), (int)chain.size());
+
+                for (const auto& donor : chain)
                 {
                     if (!pINI->GetSection(donor.c_str()))
                     {
@@ -1589,6 +1616,7 @@ namespace TraitExt
             def.ForceWeapon = ReadKey(pINI, name.c_str(), "ForceWeapon");
             def.NearTypes = SplitCSV(ReadKey(pINI, name.c_str(), "NearTypes"));
             def.NearOwner = ReadKey(pINI, name.c_str(), "NearOwner");
+            def.RequirePower = ReadKey(pINI, name.c_str(), "RequirePower");
             {
                 const std::string r = ReadKey(pINI, name.c_str(), "NearRange");
                 def.NearRange = r.empty() ? 0 : std::atoi(r.c_str());
@@ -1624,7 +1652,8 @@ namespace TraitExt
                     || !std::strcmp(keyName, "ForceWeapon")
                     || !std::strcmp(keyName, "NearTypes")
                     || !std::strcmp(keyName, "NearRange")
-                    || !std::strcmp(keyName, "NearOwner"))
+                    || !std::strcmp(keyName, "NearOwner")
+                    || !std::strcmp(keyName, "RequirePower"))
                     continue;
                 if (keyName[0] == '$')
                     continue; // leave $Inherits and friends to Phobos
@@ -1791,6 +1820,12 @@ namespace TraitExt
                 ct.Def = &def;
                 ct.Requirement = def.Requirement;
                 ct.NearTypes = def.NearTypes;
+                if (!def.RequirePower.empty())
+                    ct.NeedPower = (def.RequirePower[0] == 'y' || def.RequirePower[0] == 'Y'
+                        || def.RequirePower[0] == 't' || def.RequirePower[0] == 'T'
+                        || def.RequirePower[0] == '1')
+                        ? ConditionalTrait::Power::Full
+                        : ConditionalTrait::Power::Low;
                 ct.NearRange = def.NearRange;
                 if (!_stricmp(def.NearOwner.c_str(), "Ally"))
                     ct.NearOwner = ConditionalTrait::Whose::Ally;

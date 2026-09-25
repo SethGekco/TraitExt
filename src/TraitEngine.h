@@ -82,6 +82,12 @@ namespace TraitExt
         int NearRange = 0;
         // Whose objects count: Owner (default), Ally, Enemy or Any.
         std::string NearOwner;
+        // Power gate. "yes" = applies only while the owner's base has FULL
+        // power; "no" = only while it is in LOW power. That second form is the
+        // "powered unit" case: a unit that converts when the base browns out.
+        // House-wide, because power is a house property, and re-checked on the
+        // same cadence as the other gates so it opens and closes.
+        std::string RequirePower;
         // Author order is preserved: fold order is declaration order.
         std::vector<std::pair<std::string, std::string>> Entries;
         // Per-key mode overrides from "<Key>.Merge=" inside the trait section.
@@ -208,12 +214,14 @@ namespace TraitExt
     struct ConditionalTrait
     {
         enum class Whose { Owner, Ally, Enemy, Any };
+        enum class Power { Ignore, Full, Low };
 
         const TraitDef* Def = nullptr;
         std::vector<std::string> Requirement;
         std::vector<std::string> NearTypes;
         int NearRange = 0;                  // cells; 0 disables the gate
         Whose NearOwner = Whose::Owner;
+        Power NeedPower = Power::Ignore;
         std::string CloneID;        // empty unless the trait changes appearance
     };
 

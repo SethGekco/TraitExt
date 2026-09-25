@@ -107,6 +107,23 @@ namespace
         return true;
     }
 
+    // Power is a HOUSE property, so this is house-wide by nature: every unit of
+    // the owner flips together when the base browns out. That is what makes a
+    // "powered unit" read correctly - it is the base losing power, not the unit.
+    bool PowerMeets(TechnoClass* pThis, const TraitExt::ConditionalTrait& ct)
+    {
+        if (ct.NeedPower == TraitExt::ConditionalTrait::Power::Ignore)
+            return true;
+
+        HouseClass* const pOwner = pThis ? pThis->Owner : nullptr;
+        if (!pOwner)
+            return false;
+
+        return ct.NeedPower == TraitExt::ConditionalTrait::Power::Full
+            ? pOwner->HasFullPower()
+            : pOwner->HasLowPower();
+    }
+
     void ApplyOneTrait(TechnoClass* pThis, const TraitExt::TraitDef* pDef, bool hasClone)
     {
         TechnoTypeClass* const pType = pThis->GetTechnoType();
@@ -199,7 +216,8 @@ namespace
             // next to one of these". Either half may be absent, in which case
             // it does not constrain.
             if (OwnerMeets(pThis, (*pList)[i].Requirement)
-                && TraitExt::Conditional::NearMeets(pThis, (*pList)[i]))
+                && TraitExt::Conditional::NearMeets(pThis, (*pList)[i])
+                && PowerMeets(pThis, (*pList)[i]))
                 mask |= (1u << i);
         }
 

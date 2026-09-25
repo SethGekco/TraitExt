@@ -33,9 +33,22 @@ below (which are consumed by TraitExt and never written to targets).
 | `NearTypes=` | applies only while one of these stands within `NearRange` |
 | `NearRange=` | proximity radius in **cells** (required by `NearTypes`) |
 | `NearOwner=` | whose objects count: `Owner` (default), `Ally`, `Enemy`, `Any` |
+| `RequirePower=` | `yes` = only while the owner's base has FULL power; `no` = only while it is in LOW power |
 
-`Requirement=` and `NearTypes=` can be combined — both must hold. Either alone
-is fine too.
+`Requirement=`, `NearTypes=` and `RequirePower=` can be combined — ALL present
+gates must hold. Any one alone is fine too.
+
+`RequirePower=no` is the "powered unit" case: the unit converts when the base
+browns out, and converts back when power is restored. Power is a HOUSE property,
+so every unit of that owner flips together — which is what makes it read as the
+base losing power rather than the unit.
+
+```ini
+[T_Brownout]                ; Prism Tank drops to a plain cannon on low power
+AppliesTo=SREF
+RequirePower=no
+InheritFrom=MTNK
+```
 
 ```ini
 [T_Escort]                  ; veteran only while it stays near a Battle Fortress
