@@ -46,6 +46,8 @@ namespace TraitExt
     namespace
     {
         std::vector<std::pair<std::string, std::string>> g_CameoRestore;
+        struct CameoOverride { std::string Target, Cameo, AltCameo; };
+        std::vector<CameoOverride> g_CameoOverrides;
         bool g_CameoFixEnabled = true;
         bool g_CameoApplied = false;
     }
@@ -297,6 +299,9 @@ namespace TraitExt
                 return;
             g_CameoApplied = true;
 
+            // Explicit overrides are applied LAST, below, so they beat the
+            // keep-original restore for the same type.
+
             for (const auto& kv : g_CameoRestore)
             {
                 TechnoTypeClass* const pType = TechnoTypeClass::Find(kv.first.c_str());
@@ -337,6 +342,60 @@ namespace TraitExt
                         cameo.c_str(), kv.first.c_str());
                 }
             }
+
+            // Explicit trait cameos, last so they beat the restore above.
+            for (const auto& ov : g_CameoOverrides)
+            {
+                TechnoTypeClass* const pType = TechnoTypeClass::Find(ov.Target.c_str());
+                if (!pType)
+                {
+                    Debug::Log("[TraitExt] WARN Cameo= for '%s': no such type\n",
+                        ov.Target.c_str());
+                    continue;
+                }
+
+                auto load = [&](const std::string& name, char* pField, int fieldSize,
+                    SHPStruct** ppSHP, const char* what) -> void
+                {
+                    if (name.empty())
+                        return;
+
+                    // Authors write "GTNKICON"; the loader wants a filename.
+                    std::string file = name;
+                    if (file.size() < 5
+                        || _stricmp(file.c_str() + file.size() - 4, ".shp") != 0)
+                        file += ".shp";
+
+                    if (SHPStruct* const pSHP = FileSystem::LoadSHPFile(file.c_str()))
+                    {
+                        std::strncpy(pField, file.c_str(), fieldSize - 1);
+                        pField[fieldSize - 1] = '\0';
+                        *ppSHP = pSHP;
+                        Debug::Log("[TraitExt] %s: %s set to '%s'\n",
+                            ov.Target.c_str(), what, file.c_str());
+                    }
+                    else
+                    {
+                        // Naming a cameo that is not in any MIX is the likely
+                        // mistake, and it is silent otherwise.
+                        Debug::Log("[TraitExt] WARN %s: %s '%s' failed to load - "
+                            "is it in an installed MIX?\n",
+                            ov.Target.c_str(), what, file.c_str());
+                    }
+                };
+
+                load(ov.Cameo, pType->CameoFile,
+                    static_cast<int>(sizeof(pType->CameoFile)), &pType->Cameo, "Cameo");
+                load(ov.AltCameo, pType->AltCameoFile,
+                    static_cast<int>(sizeof(pType->AltCameoFile)), &pType->AltCameo,
+                    "AltCameo");
+            }
+        }
+
+        void Override(const std::string& targetID, const std::string& cameo,
+            const std::string& altCameo)
+        {
+            g_CameoOverrides.push_back(CameoOverride { targetID, cameo, altCameo });
         }
     }
 
@@ -1347,7 +1406,8 @@ namespace TraitExt
             return !def.Requirement.empty() || !def.NearTypes.empty()
                 || !def.RequirePower.empty() || !def.RequireNot.empty()
                 || !def.RequireHealthBelow.empty() || !def.RequireVeterancy.empty()
-                || !def.RequireAmmoBelow.empty();
+                || !def.RequireAmmoBelow.empty()
+                || !def.RequirePassengers.empty();
         }
 
         void ExpandInheritFrom(CCINIClass* pINI,
@@ -1573,6 +1633,7 @@ namespace TraitExt
             "NearTypes", "NearRange", "NearOwner", "NearCount", "NearNot",
             "RequirePower", "RequireNot", "RequireHealthBelow",
             "RequireVeterancy", "RequireAmmoBelow", "Weight",
+            "Cameo", "AltCameo", "RequirePassengers",
         };
 
         bool IsReservedTraitKey(const char* key)
@@ -1688,6 +1749,9 @@ namespace TraitExt
             def.NearNot = ReadKey(pINI, name.c_str(), "NearNot");
             def.RequireAmmoBelow = ReadKey(pINI, name.c_str(), "RequireAmmoBelow");
             def.BlockedFor = SplitCSV(ReadKey(pINI, name.c_str(), "BlockedFor"));
+            def.Cameo = ReadKey(pINI, name.c_str(), "Cameo");
+            def.AltCameo = ReadKey(pINI, name.c_str(), "AltCameo");
+            def.RequirePassengers = ReadKey(pINI, name.c_str(), "RequirePassengers");
             {
                 const std::string w = ReadKey(pINI, name.c_str(), "Weight");
                 def.Weight = w.empty() ? 1 : std::atoi(w.c_str());
@@ -1927,6 +1991,8 @@ namespace TraitExt
                 if (!def.RequireVeterancy.empty())
                     ct.MinVeterancy = !_stricmp(def.RequireVeterancy.c_str(), "elite") ? 2
                         : !_stricmp(def.RequireVeterancy.c_str(), "veteran") ? 1 : 0;
+                if (!def.RequirePassengers.empty())
+                    ct.MinPassengers = std::atoi(def.RequirePassengers.c_str());
                 if (!def.RequireAmmoBelow.empty())
                     ct.AmmoBelow = std::atoi(def.RequireAmmoBelow.c_str());
                 if (!def.NearCount.empty())
@@ -2492,7 +2558,11 @@ namespace TraitExt
             }
 
             for (const TraitDef* def : resolved)
+            {
                 g_TraitsApplied.insert(def->Name);
+                if (!def->Cameo.empty() || !def->AltCameo.empty())
+                    CameoFix::Override(target, def->Cameo, def->AltCameo);
+            }
 
             // ---- 5. Collect contributions per key, preserving order ---------
             std::vector<std::string> keyOrder;

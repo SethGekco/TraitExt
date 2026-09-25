@@ -108,6 +108,14 @@ namespace TraitExt
         // thing an author cannot fix from the data side by repeating entries,
         // because a repeated name is caught as a duplicate.
         int Weight = 1;
+        // Explicit sidebar cameo. A real game key lives in artmd.ini, which this
+        // DLL never reads, so these are consumed here and applied to the loaded
+        // type instead of being written to the rules.
+        std::string Cameo;
+        std::string AltCameo;
+        // At least this many passengers aboard. The natural gate for transports
+        // and for a Gunner unit whose whole behaviour depends on its cargo.
+        std::string RequirePassengers;
         // Author order is preserved: fold order is declaration order.
         std::vector<std::pair<std::string, std::string>> Entries;
         // Per-key mode overrides from "<Key>.Merge=" inside the trait section.
@@ -220,6 +228,11 @@ namespace TraitExt
     {
         // targetID -> the art section it used before a trait changed Image.
         void Remember(const std::string& targetID, const std::string& originalArt);
+        // An EXPLICIT cameo from a trait. Cameo= lives in artmd.ini, which this
+        // DLL never reads, so a trait could not set one - only inherit it via
+        // Image=. Applied after the keep-original pass so it wins.
+        void Override(const std::string& targetID, const std::string& cameo,
+            const std::string& altCameo);
         void Apply();   // called once types are loaded
         bool Enabled();
         void SetEnabled(bool on);
@@ -250,6 +263,7 @@ namespace TraitExt
         int MinVeterancy = -1;          // -1 = no rank gate; 0/1/2
         int NearCountMin = 1;
         int AmmoBelow = -1;             // -1 = no ammo gate
+        int MinPassengers = -1;         // -1 = no passenger gate
         bool NearInvert = false;
         std::string CloneID;        // empty unless the trait changes appearance
     };

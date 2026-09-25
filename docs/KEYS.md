@@ -42,6 +42,8 @@ below (which are consumed by TraitExt and never written to targets).
 | `RequireAmmoBelow=` | only while the unit has this much ammo or less |
 | `BlockedFor=` | targets this trait REFUSES — the mirror of a target's `BlockTraits=` |
 | `Weight=` | relative likelihood in a random pool (default 1; `3` = three times as likely) |
+| `Cameo=` / `AltCameo=` | set the sidebar cameo directly (see below) |
+| `RequirePassengers=` | only while at least this many passengers are aboard |
 
 All gates combine — every gate present must hold. Any one alone is fine too.
 
@@ -298,5 +300,22 @@ TraitExt reports the two mistakes that look like a broken feature:
   possible. So a unit that drives out of a `NearTypes=` radius keeps the
   veterancy it gained. Use proximity gates for looks and weapons; treat any stat
   bonus from one as permanent.
-* **Cameos come from `artmd.ini`**, which TraitExt does not process, so a cameo
+### Cameos — `Cameo=`
+
+`Cameo=` is normally an **artmd.ini** key, which TraitExt never reads, so a trait
+could previously only inherit a cameo by changing `Image=` — all-or-nothing. This
+key sets it directly on the loaded type instead:
+
+```ini
+[T_Disguise]
+AppliesTo=MTNK
+Image=SREF
+Cameo=GTNKICON          ; looks like a Prism Tank, still sells itself as a Grizzly
+```
+
+`.shp` is appended if you omit it, and `AltCameo=` works the same way. An
+explicit `Cameo=` is applied **after** the `KeepOriginalCameo` pass, so it wins.
+A name that isn't in any installed MIX warns rather than failing silently.
+
+* **Cameos otherwise come from `artmd.ini`**, which TraitExt does not process, so a cameo
   cannot be set directly — only inherited via `Image=` (or kept, the default).

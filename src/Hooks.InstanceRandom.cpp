@@ -172,6 +172,14 @@ namespace
                 return false;
         }
 
+        if (ct.MinPassengers >= 0)
+        {
+            // Passengers lives on TechnoClass (TechnoClass.h:597), not FootClass,
+            // so this needs no cast and works for buildings too.
+            if (pThis->Passengers.NumPassengers < ct.MinPassengers)
+                return false;
+        }
+
         if (ct.AmmoBelow >= 0)
         {
             if (pThis->Ammo > ct.AmmoBelow)
