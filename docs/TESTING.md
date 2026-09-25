@@ -190,8 +190,31 @@ traits resolve after the whole INI is parsed. Test 11 proves it.
   `[InfantryTypes]`, `[BuildingTypes]`, `[AircraftTypes]`. Widen with
   `[TraitExt] TargetLists=` (more list sections) or `[TraitTargets]` (individual
   sections).
-- **Random is per-type and deterministic**, not per-instance and not per-match.
-  Per-instance random (each soldier a different voice) is a later phase and needs
-  the synced-RNG work.
-- **Runtime verbs are not implemented yet** — building-driven "push" upgrades and
-  prerequisite-unlocked "pull" self-buffs are the next phase.
+- ~~Random is per-type and deterministic~~ **DONE.** Per-match seeding and
+  `RandomScope=Instance` both work; instance draws use the synced
+  `ScenarioClass::Random`.
+- ~~Runtime verbs are not implemented yet~~ **The "pull" direction is DONE** —
+  `Requirement=` (house-wide prerequisite) and `NearTypes=`/`NearRange=`
+  (proximity), both judged per unit and re-checked so they open and close.
+  The building-driven **"push"** direction was never built and is now largely
+  redundant: `AppliesTo=` + `Requirement=` expresses the FactoryPlant case from
+  the trait side, and `NearTypes=` covers "aura around a building". Push would
+  only add a different place to write the same rule.
+
+## Actually still missing
+
+- **Per-unit appearance is VEHICLE-ONLY.** Clones resolve through `UnitTypeClass`
+  and the draw swap hooks `UnitClass`, so infantry/aircraft/buildings cannot vary
+  their look. Their other keys still apply and TraitExt warns at load.
+- **Per-instance VOICES.** Voices vary fine at Type scope (they are ordinary rules
+  keys), but "each soldier a different voice" needs the voice-resolve hooks
+  (`0x7090A0 VoiceAttack`, `0x708FC0 ResponseMove`) — cosmetic, so they must use
+  the unsynced local RNG.
+- **Gated STATS do not roll back** when a gate closes; only art and weapon follow
+  it both ways. Un-applying a fold is not generally possible.
+- **Cameos cannot be set directly** — `Cameo=` lives in `artmd.ini`, which
+  TraitExt does not process. It can only be inherited via `Image=`, or kept.
+- **`ForceBodyFacing` is not 100% reliable** — occasionally a turretless-looking
+  variant does not rotate to fire. Open.
+- **`TraitsRandomCount` above 1,1 is untested in-game** — the multi-pick path is
+  implemented but has only ever been exercised with a single pick.
