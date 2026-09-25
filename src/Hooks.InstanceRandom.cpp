@@ -30,6 +30,8 @@
 #include <HouseClass.h>
 #include <UnitClass.h>
 #include <UnitTypeClass.h>
+#include <InfantryClass.h>
+#include <InfantryTypeClass.h>
 #include <unordered_map>
 #include <cmath>
 #include <ScenarioClass.h>
@@ -458,6 +460,7 @@ namespace
 {
     // unit -> the clone type it should be DRAWN as.
     std::unordered_map<void*, UnitTypeClass*> g_Variant;
+    std::unordered_map<void*, InfantryTypeClass*> g_VariantInf;
     // clone type -> must aim with the body instead of a turret.
     std::unordered_map<void*, bool> g_BodyFacing;
     std::unordered_set<std::string> g_BodyFacingIDs;
@@ -472,6 +475,14 @@ namespace
     int g_SwappedTurretNumber = 0;
     bool g_SwappedTurretFixed = false;
 
+    // Infantry keep their OWN pending-restore state and their own map. Type is
+    // InfantryTypeClass* there, not UnitTypeClass*, so sharing one map would
+    // mean casting a pointer whose real class we only know by context - the
+    // kind of cast that works right up until a clone is registered in the
+    // other list.
+    InfantryClass* g_SwappedInf = nullptr;
+    InfantryTypeClass* g_SwappedInfOriginal = nullptr;
+
     void RestorePending()
     {
         if (g_Swapped && g_SwappedOriginal)
@@ -483,6 +494,11 @@ namespace
         g_Swapped = nullptr;
         g_SwappedOriginal = nullptr;
         g_SwappedTurretFixed = false;
+
+        if (g_SwappedInf && g_SwappedInfOriginal)
+            g_SwappedInf->Type = g_SwappedInfOriginal;
+        g_SwappedInf = nullptr;
+        g_SwappedInfOriginal = nullptr;
     }
 }
 
@@ -500,6 +516,10 @@ namespace TraitExt
             {
                 g_Variant[pThis] = pClone;
             }
+            else if (auto* const pInf = InfantryTypeClass::Find(cloneID))
+            {
+                g_VariantInf[pThis] = pInf;
+            }
             else
             {
                 // Logged once per clone id: means the synthesised section never
@@ -516,9 +536,11 @@ namespace TraitExt
 
         void Forget(::TechnoClass* pThis)
         {
-            if (g_Swapped == static_cast<void*>(pThis))
+            if (g_Swapped == static_cast<void*>(pThis)
+                || g_SwappedInf == static_cast<void*>(pThis))
                 RestorePending();
             g_Variant.erase(pThis);
+            g_VariantInf.erase(pThis);
         }
 
         void SetForceBodyFacing(const std::string& cloneID, bool on)
@@ -541,7 +563,7 @@ namespace TraitExt
 
         bool Enabled() { return g_VariantEnabled; }
         void SetEnabled(bool on) { g_VariantEnabled = on; }
-        bool Any() { return !g_Variant.empty(); }
+        bool Any() { return !g_Variant.empty() || !g_VariantInf.empty(); }
     }
 
     void ApplyInstanceTraits(::TechnoClass* pThis,
@@ -682,6 +704,51 @@ namespace
             }
         }
     }
+}
+
+// Per-unit art for INFANTRY. The vehicle path swaps Type around DrawAsVXL /
+// DrawAsSHP; infantry draw through their own function, so the same trick needs
+// its own seat.
+//
+// 0x518F90 = InfantryClass::DrawIt. Per the Hook Encyclopedia registry NOTHING
+// hooks this entry (Phobos/Kratos take points INSIDE it - 0x518FBC, 0x518FC8,
+// 0x519168, 0x51933B, 0x51946D, 0x5194EF - none of which overlap an entry
+// steal). Boundary from objdump of gamemd.exe:
+//   518F90  83 EC 44        sub esp,0x44        (3)
+//   518F93  8B 44 24 48     mov eax,[esp+0x48]  (4)
+// so the only clean steal is 0x7. A 5-byte steal splits that mov and leaves a
+// dangling tail - the same mis-sizing that crashed the DTOR hook at 0x6F4500.
+//
+// NOTE there is deliberately NO voxel guard here. Infantry are SHP, so
+// MainVoxel.HVA is null for every one of them; the vehicle path's null-HVA
+// check would refuse every infantry swap.
+DEFINE_HOOK(0x518F90, InfantryClass_DrawIt_VariantArt, 0x7)
+{
+    RestorePending();
+
+    if (!g_VariantEnabled || g_VariantInf.empty())
+        return 0;
+
+    GET(InfantryClass*, pThis, ECX);
+    if (!pThis)
+        return 0;
+
+    const auto it = g_VariantInf.find(pThis);
+    if (it == g_VariantInf.end() || !it->second || pThis->Type == it->second)
+        return 0;
+
+    static bool s_logged = false;
+    if (!s_logged)
+    {
+        s_logged = true;
+        Debug::Log("[TraitExt] infantry variant art ACTIVE: first draw swap %s -> %s\n",
+            pThis->Type ? pThis->Type->ID : "?", it->second->ID);
+    }
+
+    g_SwappedInf = pThis;
+    g_SwappedInfOriginal = pThis->Type;
+    pThis->Type = it->second;
+    return 0;
 }
 
 DEFINE_HOOK(0x73B470, UnitClass_DrawAsVXL_VariantArt, 0x6)

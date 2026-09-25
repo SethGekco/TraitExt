@@ -259,10 +259,11 @@ TraitExt reports the two mistakes that look like a broken feature:
 * **`Multiply` compounds against the base, not against your intent.** `Damage=2.0`
   on a 300-damage weapon gives 600; `Damage=200.0` gives 60,000. Easy to crank a
   test value and forget what the comment said.
-* **Variant art (per-unit looks) is VEHICLE-ONLY.** Clones resolve through
-  `UnitTypeClass` and the draw swap hooks `UnitClass`, so infantry, aircraft and
-  buildings cannot change appearance — their other trait keys still apply, and
-  TraitExt warns at load.
+* **Variant art (per-unit looks) works on VEHICLES and INFANTRY only.** The
+  clone trick needs a draw path that reads `Type`: `UnitClass::DrawAsVXL`/
+  `DrawAsSHP` and `InfantryClass::DrawIt` have one, aircraft and buildings do
+  not. For those two the other trait keys still apply and TraitExt warns at
+  load.
 * **`Primary=` is ignored by units that define `WeaponCount`.** Those answer
   from their `Weapon1..N` list instead — and for `Gunner=yes` units (the IFV is
   `WeaponCount=17`) the slot is chosen by **passenger**, so `Primary=` is never

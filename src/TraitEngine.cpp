@@ -1866,10 +1866,16 @@ namespace TraitExt
         // DrawAsSHP and resolves clones through UnitTypeClass - both are
         // VEHICLE paths. Infantry, aircraft and buildings draw elsewhere, so a
         // clone for them would be built and then never used. Say so at load.
+        // Vehicles AND infantry now: the clone trick needs a draw path that
+        // reads Type, and both UnitClass::DrawAsVXL/DrawAsSHP and
+        // InfantryClass::DrawIt do. Aircraft and buildings still draw elsewhere.
         auto artCapable = [&](const std::string& tgt) -> bool
         {
             const auto lit = targetList.find(tgt);
-            return lit != targetList.end() && !_stricmp(lit->second.c_str(), "VehicleTypes");
+            if (lit == targetList.end())
+                return false;
+            return !_stricmp(lit->second.c_str(), "VehicleTypes")
+                || !_stricmp(lit->second.c_str(), "InfantryTypes");
         };
 
         // Conditional traits are NOT folded statically — they must be judged
@@ -1931,10 +1937,11 @@ namespace TraitExt
 
                     if (!artCapable(want))
                     {
-                        Debug::Log("[TraitExt] WARN %s: trait '%s' sets Image, but variant art "
-                            "is VEHICLE-ONLY (the draw swap hooks UnitClass). %s is not a "
-                            "VehicleType, so its look cannot change - the trait's other keys "
-                            "still apply.\n", want.c_str(), def.Name.c_str(), want.c_str());
+                        Debug::Log("[TraitExt] WARN %s: trait '%s' sets Image, but variant "
+                            "art needs a draw path that reads Type - vehicles and infantry "
+                            "have one, aircraft and buildings do not. %s is neither, so its "
+                            "look cannot change; the trait's other keys still apply.\n",
+                            want.c_str(), def.Name.c_str(), want.c_str());
                         break;
                     }
 
@@ -2208,16 +2215,17 @@ namespace TraitExt
                                 wantsWeapon = true;
                         }
 
-                        // Art is VEHICLE-ONLY (the draw swap hooks UnitClass);
+                        // Art needs a Type-reading draw path (vehicles, infantry);
                         // weapons are not, because GetWeapon takes the instance
                         // whatever class it is.
                         bool wantsArt = !artValue.empty();
                         if (wantsArt && !artCapable(target))
                         {
                             Debug::Log("[TraitExt] WARN %s: trait '%s' sets Image, but "
-                                "variant art is VEHICLE-ONLY (the draw swap hooks "
-                                "UnitClass). %s is not a VehicleType, so its look cannot "
-                                "vary per unit - other keys still apply.\n",
+                                "variant art needs a draw path that reads Type - vehicles "
+                                "and infantry have one, aircraft and buildings do not. %s "
+                                "is neither, so its look cannot vary per unit; other keys "
+                                "still apply.\n",
                                 target.c_str(), n.c_str(), target.c_str());
                             wantsArt = false;
                         }
