@@ -39,6 +39,8 @@ below (which are consumed by TraitExt and never written to targets).
 | `RequireVeterancy=` | only at this rank or above: `rookie`, `veteran`, `elite` |
 | `NearCount=` | how many must be in range (default 1) |
 | `NearNot=` | `yes` inverts the proximity gate: applies while **nothing** is near |
+| `RequireAmmoBelow=` | only while the unit has this much ammo or less |
+| `BlockedFor=` | targets this trait REFUSES — the mirror of a target's `BlockTraits=` |
 
 All gates combine — every gate present must hold. Any one alone is fine too.
 
@@ -193,6 +195,7 @@ block and survives that.
 
 ```ini
 [TraitExt]
+Disable=no              ; yes = TraitExt does nothing at all this run
 RandomSeed=0            ; 0 = per-match. Non-zero pins a draw for repeatable tests
 KeepOriginalCameo=yes   ; keep the unit's own cameo when Image changes
 VariantArt=yes          ; kill switch for per-unit looks
@@ -229,6 +232,17 @@ unit of that type the same weapon for the whole game (it varies between matches,
 not within one). For a mixed group, use `RandomScope=Instance` — each unit draws
 its own. Don't point both a Type and an Instance pool at the same unit; they
 fight over it.
+
+## Load-time self-checks
+
+TraitExt reports the two mistakes that look like a broken feature:
+
+* **`WARN trait 'X' was NEVER APPLIED to any target`** — declared but not wired
+  to anything. Check this line first when a test appears to do nothing; gated
+  traits are exempt, since they apply per unit at runtime.
+* **`WARN trait 'X': key 'Y' looks like a TraitExt config key but is not one`** —
+  a misspelled config key (`RequirePowre=`) is otherwise invisible: it gets
+  written to targets as data and the feature silently never happens.
 
 ## Things that will bite
 

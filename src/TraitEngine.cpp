@@ -1306,6 +1306,9 @@ namespace TraitExt
         // [TraitExt] InheritExcept=. Empty by default: a donor type is data, so
         // the way to not inherit a key is to not put it in the donor.
         std::vector<std::string> g_InheritExceptDefault;
+        // Names that actually reached a target this run. Anything declared and
+        // never applied is almost always the real reason a test "did nothing".
+        std::unordered_set<std::string> g_TraitsApplied;
         // Family coherence: switch OFF a family the donor does not use, so the
         // target's own setting cannot contradict the values just copied. On by
         // default because the failures it prevents are invisible (a body with
@@ -1337,7 +1340,8 @@ namespace TraitExt
         {
             return !def.Requirement.empty() || !def.NearTypes.empty()
                 || !def.RequirePower.empty() || !def.RequireNot.empty()
-                || !def.RequireHealthBelow.empty() || !def.RequireVeterancy.empty();
+                || !def.RequireHealthBelow.empty() || !def.RequireVeterancy.empty()
+                || !def.RequireAmmoBelow.empty();
         }
 
         void ExpandInheritFrom(CCINIClass* pINI,
@@ -1551,6 +1555,43 @@ namespace TraitExt
         }
     }
 
+    namespace
+    {
+        // Every key TraitExt consumes itself. Single source of truth for both
+        // "skip it when folding" and "did the author typo it".
+        const char* const kReservedTraitKeys[] = {
+            "Merge", "Traits", "AppliesTo", "RandomPoolFor", "RandomScope",
+            "TurretFrom", "RerollInterval", "Requirement",
+            "InheritFrom", "InheritOnly", "InheritExcept", "InheritCoherence",
+            "ForceWeapon", "ForceBodyFacing", "BlockedFor",
+            "NearTypes", "NearRange", "NearOwner", "NearCount", "NearNot",
+            "RequirePower", "RequireNot", "RequireHealthBelow",
+            "RequireVeterancy", "RequireAmmoBelow",
+        };
+
+        bool IsReservedTraitKey(const char* key)
+        {
+            for (const char* r : kReservedTraitKeys)
+                if (!_stricmp(key, r))
+                    return true;
+            return false;
+        }
+
+        // Prefixes that only ever belong to TraitExt config. A key starting with
+        // one of these that is NOT reserved is almost certainly a misspelling.
+        bool LooksLikeConfigKey(const char* key)
+        {
+            static const char* const kPrefixes[] = {
+                "Require", "Near", "Inherit", "RandomPool", "RandomScope",
+                "Reroll", "Blocked", "AppliesTo",
+            };
+            for (const char* p : kPrefixes)
+                if (!_strnicmp(key, p, static_cast<int>(std::strlen(p))))
+                    return true;
+            return false;
+        }
+    }
+
     void Engine::ProcessINI(CCINIClass* pINI)
     {
         if (!pINI)
@@ -1580,6 +1621,16 @@ namespace TraitExt
         MixedTurret::SetEnabled(ReadKey(pINI, SectConfig, "MixedTurrets", "yes")[0] != 'n');
         g_MixedTurrets.clear();
         g_InheritExceptDefault = SplitCSV(ReadKey(pINI, SectConfig, "InheritExcept"));
+        if (ReadKey(pINI, SectConfig, "Disable", "no")[0] == 'y'
+            || ReadKey(pINI, SectConfig, "Disable", "no")[0] == 'Y')
+        {
+            // One switch to take the whole DLL out of the picture without
+            // rebuilding or un-registering it - the cheapest way to answer
+            // "is TraitExt causing this?" in a stack of 25 DLLs.
+            Debug::Log("[TraitExt] [TraitExt] Disable=yes - doing nothing this run\n");
+            return;
+        }
+
         g_ForceWeaponDefault =
             ReadKey(pINI, SectConfig, "ForceWeapon", "no")[0] == 'y'
             || ReadKey(pINI, SectConfig, "ForceWeapon", "no")[0] == 'Y';
@@ -1629,6 +1680,8 @@ namespace TraitExt
             def.RequireVeterancy = ReadKey(pINI, name.c_str(), "RequireVeterancy");
             def.NearCount = ReadKey(pINI, name.c_str(), "NearCount");
             def.NearNot = ReadKey(pINI, name.c_str(), "NearNot");
+            def.RequireAmmoBelow = ReadKey(pINI, name.c_str(), "RequireAmmoBelow");
+            def.BlockedFor = SplitCSV(ReadKey(pINI, name.c_str(), "BlockedFor"));
 
             // A trait that BOTH gates on veterancy and sets it feeds back into
             // its own condition, which oscillates instead of settling.
@@ -1660,30 +1713,22 @@ namespace TraitExt
                 // Reserved metadata keys — these configure the trait, they are
                 // NOT values to fold into targets. Missing one here leaks it
                 // into every target section (e.g. "E1.AppliesTo -> E1,GGI").
-                if (!keyName
-                    || !std::strcmp(keyName, "Merge")
-                    || !std::strcmp(keyName, "Traits")
-                    || !std::strcmp(keyName, "AppliesTo")
-                    || !std::strcmp(keyName, "RandomPoolFor")
-                    || !std::strcmp(keyName, "RandomScope")
-                    || !std::strcmp(keyName, "TurretFrom")
-                    || !std::strcmp(keyName, "RerollInterval")
-                    || !std::strcmp(keyName, "Requirement")
-                    || !std::strcmp(keyName, "InheritFrom")
-                    || !std::strcmp(keyName, "InheritOnly")
-                    || !std::strcmp(keyName, "InheritExcept")
-                    || !std::strcmp(keyName, "InheritCoherence")
-                    || !std::strcmp(keyName, "ForceWeapon")
-                    || !std::strcmp(keyName, "NearTypes")
-                    || !std::strcmp(keyName, "NearRange")
-                    || !std::strcmp(keyName, "NearOwner")
-                    || !std::strcmp(keyName, "RequirePower")
-                    || !std::strcmp(keyName, "RequireNot")
-                    || !std::strcmp(keyName, "RequireHealthBelow")
-                    || !std::strcmp(keyName, "RequireVeterancy")
-                    || !std::strcmp(keyName, "NearCount")
-                    || !std::strcmp(keyName, "NearNot"))
+                // One ARRAY, not a strcmp chain: the chain had to be edited in
+                // two places for every new key, and a miss is silent.
+                if (!keyName)
                     continue;
+                if (IsReservedTraitKey(keyName))
+                    continue;
+
+                // A near-miss on a config key is otherwise invisible: it is
+                // written to every target as data, and the feature it was meant
+                // to configure simply never happens. Typos here have already
+                // cost whole test rounds in this project.
+                if (LooksLikeConfigKey(keyName))
+                    Debug::Log("[TraitExt] WARN trait '%s': key '%s' looks like a "
+                        "TraitExt config key but is not one - check the spelling. "
+                        "As written it will be applied to targets as DATA.\n",
+                        name.c_str(), keyName);
                 if (keyName[0] == '$')
                     continue; // leave $Inherits and friends to Phobos
 
@@ -1855,6 +1900,8 @@ namespace TraitExt
                 if (!def.RequireVeterancy.empty())
                     ct.MinVeterancy = !_stricmp(def.RequireVeterancy.c_str(), "elite") ? 2
                         : !_stricmp(def.RequireVeterancy.c_str(), "veteran") ? 1 : 0;
+                if (!def.RequireAmmoBelow.empty())
+                    ct.AmmoBelow = std::atoi(def.RequireAmmoBelow.c_str());
                 if (!def.NearCount.empty())
                     ct.NearCountMin = (std::max)(1, std::atoi(def.NearCount.c_str()));
                 ct.NearInvert = !def.NearNot.empty()
@@ -2316,6 +2363,22 @@ namespace TraitExt
                 ExpandTrait(name, traits, resolved, stack, target.c_str());
             }
 
+            // Trait-side refusal. Mirror of the target's BlockTraits=, so a
+            // broadly-applied trait can carve out exceptions without editing
+            // the unit sections other tools keep rewriting.
+            resolved.erase(std::remove_if(resolved.begin(), resolved.end(),
+                [&target](const TraitDef* def)
+                {
+                    for (const auto& no : def->BlockedFor)
+                        if (!_stricmp(no.c_str(), target.c_str()))
+                        {
+                            Debug::Log("[TraitExt] %s: trait '%s' refuses this target "
+                                "(BlockedFor)\n", target.c_str(), def->Name.c_str());
+                            return true;
+                        }
+                    return false;
+                }), resolved.end());
+
             // A composed trait can be pulled in indirectly; honour blocks on it.
             if (!blocked.empty())
             {
@@ -2376,6 +2439,9 @@ namespace TraitExt
                     }
                 }
             }
+
+            for (const TraitDef* def : resolved)
+                g_TraitsApplied.insert(def->Name);
 
             // ---- 5. Collect contributions per key, preserving order ---------
             std::vector<std::string> keyOrder;
@@ -2497,6 +2563,18 @@ namespace TraitExt
 
         Debug::Log("[TraitExt] applied traits to %d target(s) from %d trait definition(s)\n",
             appliedTargets, static_cast<int>(traits.size()));
+
+        // The single most common false alarm in this project: a trait is staged,
+        // the run looks wrong, and the trait was never wired to anything. Gated
+        // traits are excluded - they apply per unit at runtime, not here.
+        for (const auto& kv : traits)
+        {
+            if (IsGated(kv.second) || g_TraitsApplied.count(kv.first))
+                continue;
+            Debug::Log("[TraitExt] WARN trait '%s' was NEVER APPLIED to any target. "
+                "It needs AppliesTo= / RandomPoolFor=, or a target listing it in "
+                "Traits= / TraitsRandomPool=.\n", kv.first.c_str());
+        }
 
         // Image= cycle check. A -> B while B -> A makes the engine fail to
         // resolve art: the unit renders as nothing and the sidebar shows a

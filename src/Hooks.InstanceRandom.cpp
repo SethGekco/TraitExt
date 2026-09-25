@@ -160,6 +160,12 @@ namespace
                 return false;
         }
 
+        if (ct.AmmoBelow >= 0)
+        {
+            if (pThis->Ammo > ct.AmmoBelow)
+                return false;
+        }
+
         if (ct.MinVeterancy >= 0)
         {
             const int rank = pThis->Veterancy.IsElite() ? 2

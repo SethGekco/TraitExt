@@ -99,6 +99,10 @@ namespace TraitExt
         // gate is inverted ("while nothing of this type is near").
         std::string NearCount;
         std::string NearNot;
+        std::string RequireAmmoBelow;
+        // Trait-side refusal, the mirror of the target's BlockTraits=. Lets a
+        // broadly-applied trait carve out exceptions without editing the units.
+        std::vector<std::string> BlockedFor;
         // Author order is preserved: fold order is declaration order.
         std::vector<std::pair<std::string, std::string>> Entries;
         // Per-key mode overrides from "<Key>.Merge=" inside the trait section.
@@ -237,6 +241,7 @@ namespace TraitExt
         int HealthBelowPct = 0;         // 0 = no health gate
         int MinVeterancy = -1;          // -1 = no rank gate; 0/1/2
         int NearCountMin = 1;
+        int AmmoBelow = -1;             // -1 = no ammo gate
         bool NearInvert = false;
         std::string CloneID;        // empty unless the trait changes appearance
     };
