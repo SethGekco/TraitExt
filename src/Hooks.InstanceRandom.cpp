@@ -124,6 +124,52 @@ namespace
             : pOwner->HasLowPower();
     }
 
+    // The owner must have NONE of these. Requirement= cannot express "while you
+    // lack X", and that is the natural way to write a penalty or a fallback form.
+    bool OwnerLacks(TechnoClass* pThis, const std::vector<std::string>& forbid)
+    {
+        if (forbid.empty())
+            return true;
+        HouseClass* const pOwner = pThis ? pThis->Owner : nullptr;
+        if (!pOwner)
+            return false;
+
+        for (const auto& id : forbid)
+        {
+            TechnoTypeClass* const pNo = TechnoTypeClass::Find(id.c_str());
+            if (pNo && pOwner->CountOwnedAndPresent(pNo) > 0)
+                return false;
+        }
+        return true;
+    }
+
+    // Gates on the unit's OWN state rather than its owner's. Health is a percent
+    // so one threshold reads the same on a 300hp tank and a 2000hp one.
+    bool SelfMeets(TechnoClass* pThis, const TraitExt::ConditionalTrait& ct)
+    {
+        TechnoTypeClass* const pType = pThis ? pThis->GetTechnoType() : nullptr;
+        if (!pType)
+            return false;
+
+        if (ct.HealthBelowPct > 0)
+        {
+            if (pType->Strength <= 0)
+                return false;
+            const int pct = pThis->Health * 100 / pType->Strength;
+            if (pct > ct.HealthBelowPct)
+                return false;
+        }
+
+        if (ct.MinVeterancy >= 0)
+        {
+            const int rank = pThis->Veterancy.IsElite() ? 2
+                : pThis->Veterancy.IsVeteran() ? 1 : 0;
+            if (rank < ct.MinVeterancy)
+                return false;
+        }
+        return true;
+    }
+
     void ApplyOneTrait(TechnoClass* pThis, const TraitExt::TraitDef* pDef, bool hasClone)
     {
         TechnoTypeClass* const pType = pThis->GetTechnoType();
@@ -215,9 +261,12 @@ namespace
             // Both gates must hold: "I have a Battle Lab" AND "I am standing
             // next to one of these". Either half may be absent, in which case
             // it does not constrain.
-            if (OwnerMeets(pThis, (*pList)[i].Requirement)
-                && TraitExt::Conditional::NearMeets(pThis, (*pList)[i])
-                && PowerMeets(pThis, (*pList)[i]))
+            const TraitExt::ConditionalTrait& c = (*pList)[i];
+            if (OwnerMeets(pThis, c.Requirement)
+                && OwnerLacks(pThis, c.RequireNot)
+                && TraitExt::Conditional::NearMeets(pThis, c)
+                && PowerMeets(pThis, c)
+                && SelfMeets(pThis, c))
                 mask |= (1u << i);
         }
 

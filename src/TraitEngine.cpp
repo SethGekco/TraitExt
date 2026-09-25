@@ -418,6 +418,9 @@ namespace TraitExt
             HouseClass* const pOwner = pThis->Owner;
             const int reach = ct.NearRange * Unsorted::LeptonsPerCell;
 
+            // Counted, not first-match: NearCount= asks for N in range, and
+            // NearNot= inverts the whole verdict ("while nothing is near").
+            int found = 0;
             for (const auto& id : ct.NearTypes)
             {
                 const auto it = g_NearIndex.find(id);
@@ -446,10 +449,13 @@ namespace TraitExt
                     }
 
                     if (pThis->DistanceFrom(pOther) <= reach)
-                        return true;
+                    {
+                        if (++found >= ct.NearCountMin)
+                            return !ct.NearInvert;
+                    }
                 }
             }
-            return false;
+            return ct.NearInvert;
         }
     }
 
@@ -1330,7 +1336,8 @@ namespace TraitExt
         bool IsGated(const TraitDef& def)
         {
             return !def.Requirement.empty() || !def.NearTypes.empty()
-                || !def.RequirePower.empty();
+                || !def.RequirePower.empty() || !def.RequireNot.empty()
+                || !def.RequireHealthBelow.empty() || !def.RequireVeterancy.empty();
         }
 
         void ExpandInheritFrom(CCINIClass* pINI,
@@ -1617,6 +1624,23 @@ namespace TraitExt
             def.NearTypes = SplitCSV(ReadKey(pINI, name.c_str(), "NearTypes"));
             def.NearOwner = ReadKey(pINI, name.c_str(), "NearOwner");
             def.RequirePower = ReadKey(pINI, name.c_str(), "RequirePower");
+            def.RequireNot = SplitCSV(ReadKey(pINI, name.c_str(), "RequireNot"));
+            def.RequireHealthBelow = ReadKey(pINI, name.c_str(), "RequireHealthBelow");
+            def.RequireVeterancy = ReadKey(pINI, name.c_str(), "RequireVeterancy");
+            def.NearCount = ReadKey(pINI, name.c_str(), "NearCount");
+            def.NearNot = ReadKey(pINI, name.c_str(), "NearNot");
+
+            // A trait that BOTH gates on veterancy and sets it feeds back into
+            // its own condition, which oscillates instead of settling.
+            if (!def.RequireVeterancy.empty())
+                for (const auto& e : def.Entries)
+                    if (!_stricmp(e.first.c_str(), "Veterancy"))
+                    {
+                        Debug::Log("[TraitExt] WARN trait '%s': gates on RequireVeterancy "
+                            "AND sets Veterancy - it would re-trigger its own condition. "
+                            "Split it into two traits.\n", name.c_str());
+                        break;
+                    }
             {
                 const std::string r = ReadKey(pINI, name.c_str(), "NearRange");
                 def.NearRange = r.empty() ? 0 : std::atoi(r.c_str());
@@ -1653,7 +1677,12 @@ namespace TraitExt
                     || !std::strcmp(keyName, "NearTypes")
                     || !std::strcmp(keyName, "NearRange")
                     || !std::strcmp(keyName, "NearOwner")
-                    || !std::strcmp(keyName, "RequirePower"))
+                    || !std::strcmp(keyName, "RequirePower")
+                    || !std::strcmp(keyName, "RequireNot")
+                    || !std::strcmp(keyName, "RequireHealthBelow")
+                    || !std::strcmp(keyName, "RequireVeterancy")
+                    || !std::strcmp(keyName, "NearCount")
+                    || !std::strcmp(keyName, "NearNot"))
                     continue;
                 if (keyName[0] == '$')
                     continue; // leave $Inherits and friends to Phobos
@@ -1820,6 +1849,18 @@ namespace TraitExt
                 ct.Def = &def;
                 ct.Requirement = def.Requirement;
                 ct.NearTypes = def.NearTypes;
+                ct.RequireNot = def.RequireNot;
+                if (!def.RequireHealthBelow.empty())
+                    ct.HealthBelowPct = std::atoi(def.RequireHealthBelow.c_str());
+                if (!def.RequireVeterancy.empty())
+                    ct.MinVeterancy = !_stricmp(def.RequireVeterancy.c_str(), "elite") ? 2
+                        : !_stricmp(def.RequireVeterancy.c_str(), "veteran") ? 1 : 0;
+                if (!def.NearCount.empty())
+                    ct.NearCountMin = (std::max)(1, std::atoi(def.NearCount.c_str()));
+                ct.NearInvert = !def.NearNot.empty()
+                    && (def.NearNot[0] == 'y' || def.NearNot[0] == 'Y'
+                        || def.NearNot[0] == 't' || def.NearNot[0] == 'T'
+                        || def.NearNot[0] == '1');
                 if (!def.RequirePower.empty())
                     ct.NeedPower = (def.RequirePower[0] == 'y' || def.RequirePower[0] == 'Y'
                         || def.RequirePower[0] == 't' || def.RequirePower[0] == 'T'

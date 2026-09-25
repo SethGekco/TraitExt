@@ -34,9 +34,36 @@ below (which are consumed by TraitExt and never written to targets).
 | `NearRange=` | proximity radius in **cells** (required by `NearTypes`) |
 | `NearOwner=` | whose objects count: `Owner` (default), `Ally`, `Enemy`, `Any` |
 | `RequirePower=` | `yes` = only while the owner's base has FULL power; `no` = only while it is in LOW power |
+| `RequireNot=` | the owner must have **none** of these — the "while you lack X" case |
+| `RequireHealthBelow=` | only while the unit is at or below this **percent** health |
+| `RequireVeterancy=` | only at this rank or above: `rookie`, `veteran`, `elite` |
+| `NearCount=` | how many must be in range (default 1) |
+| `NearNot=` | `yes` inverts the proximity gate: applies while **nothing** is near |
 
-`Requirement=`, `NearTypes=` and `RequirePower=` can be combined — ALL present
-gates must hold. Any one alone is fine too.
+All gates combine — every gate present must hold. Any one alone is fine too.
+
+```ini
+[T_LastStand]               ; desperate form: hurt, and no Battle Lab left
+AppliesTo=MTNK
+RequireHealthBelow=35
+RequireNot=GATECH
+Weapon1=Comet
+
+[T_Alone]                   ; no friendly tank within 8 cells
+AppliesTo=MTNK
+NearTypes=MTNK
+NearRange=8
+NearNot=yes
+
+[T_Swarm]                   ; only once four of them gather
+AppliesTo=MTNK
+NearTypes=MTNK
+NearRange=5
+NearCount=4
+```
+
+⚠ A trait must not gate on `RequireVeterancy` **and** set `Veterancy` — it would
+re-trigger its own condition. TraitExt warns at load.
 
 `RequirePower=no` is the "powered unit" case: the unit converts when the base
 browns out, and converts back when power is restored. Power is a HOUSE property,

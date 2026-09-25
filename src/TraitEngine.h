@@ -88,6 +88,17 @@ namespace TraitExt
         // House-wide, because power is a house property, and re-checked on the
         // same cadence as the other gates so it opens and closes.
         std::string RequirePower;
+        // Gate NEGATION: the owner must have NONE of these. Lets a trait be the
+        // "while you lack X" case, which Requirement= cannot express.
+        std::vector<std::string> RequireNot;
+        // Self-state gates, judged on the unit itself rather than its owner.
+        // Health is a PERCENT so it reads the same for every unit.
+        std::string RequireHealthBelow;
+        std::string RequireVeterancy;   // rookie | veteran | elite
+        // Proximity refinements: how MANY must be in range, and whether the
+        // gate is inverted ("while nothing of this type is near").
+        std::string NearCount;
+        std::string NearNot;
         // Author order is preserved: fold order is declaration order.
         std::vector<std::pair<std::string, std::string>> Entries;
         // Per-key mode overrides from "<Key>.Merge=" inside the trait section.
@@ -222,6 +233,11 @@ namespace TraitExt
         int NearRange = 0;                  // cells; 0 disables the gate
         Whose NearOwner = Whose::Owner;
         Power NeedPower = Power::Ignore;
+        std::vector<std::string> RequireNot;
+        int HealthBelowPct = 0;         // 0 = no health gate
+        int MinVeterancy = -1;          // -1 = no rank gate; 0/1/2
+        int NearCountMin = 1;
+        bool NearInvert = false;
         std::string CloneID;        // empty unless the trait changes appearance
     };
 
