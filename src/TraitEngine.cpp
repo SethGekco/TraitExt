@@ -474,6 +474,8 @@ namespace TraitExt
 
     namespace InstanceRandom
     {
+        unsigned Salt() { return g_Salt; }
+
         const InstancePool* Find(const char* typeID)
         {
             if (!typeID || g_InstancePools.empty())
@@ -1309,6 +1311,7 @@ namespace TraitExt
         // Names that actually reached a target this run. Anything declared and
         // never applied is almost always the real reason a test "did nothing".
         std::unordered_set<std::string> g_TraitsApplied;
+        unsigned g_Salt = 0;
         // Family coherence: switch OFF a family the donor does not use, so the
         // target's own setting cannot contradict the values just copied. On by
         // default because the failures it prevents are invisible (a body with
@@ -1837,6 +1840,7 @@ namespace TraitExt
                 seedFromScenario = true;
             }
         }
+        g_Salt = globalSeed;
         Debug::Log("[TraitExt] using seed %u (%s)\n", globalSeed,
             seedFromScenario ? "per-match" : "fixed from RandomSeed");
 

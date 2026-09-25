@@ -11,10 +11,20 @@
 //   pointers get recycled and a stale entry would silently skip a new unit.
 //
 // SYNC: Health/Veterancy/Ammo are game LOGIC, so the draw must be identical on
-// every client. We therefore use the game's own synced RNG
-// (ScenarioClass::Instance->Random) rather than any local generator — the exact
-// mistake that causes the classic shared-RNG desync. All clients tick the same
-// units in the same order, so the draw sequence matches.
+// every client. This used to pull from ScenarioClass::Instance->Random, which is
+// synced but has two problems: it is only identical if every client ticks the
+// same units in the same ORDER, and every pull SHIFTS the stream, so vanilla
+// randomness differed with the DLL loaded even when no trait did anything.
+//
+// The draw is now a pure function of (per-match salt, AbstractClass::UniqueID).
+// UniqueID comes from a synced creation counter, so it agrees across clients on
+// creation order rather than tick order, consumes nothing from the shared
+// stream, and is saved with the object - so a unit keeps its variant across a
+// save/load instead of silently re-rolling, and a match is reproducible.
+//
+// The LOCAL generator below is still used for the cosmetic morph re-roll, which
+// is deliberately unsynced. Do not confuse the two: see [[kratos-rng-desync]]
+// for what happens when one generator serves both purposes.
 
 #include "TraitExt.h"
 #include "TraitEngine.h"
@@ -406,9 +416,37 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
     if (!pScen)
         return 0;
 
+    // The draw is a PURE FUNCTION of (match salt, this unit's UniqueID) rather
+    // than a sequential pull from ScenarioClass::Random. Three reasons, in
+    // order of how much they matter:
+    //
+    //  1. SYNC. A sequential pull is only identical across clients if every
+    //     client ticks the same units in the same order. UniqueID comes from a
+    //     synced creation counter, so this depends on CREATION order instead -
+    //     a weaker and much more defensible assumption.
+    //  2. It no longer PERTURBS the synced stream. Pulling from
+    //     ScenarioClass::Random shifted every later vanilla draw, so the game
+    //     played differently with the DLL loaded than without it, even when no
+    //     trait did anything.
+    //  3. SAVE/LOAD and REPRODUCIBILITY. UniqueID is saved with the object, so
+    //     a unit draws the same variant after a reload instead of silently
+    //     re-rolling - and a given match is repeatable for testing.
+    const unsigned uid = pThis->UniqueID;
+    auto unitRand = [salt = TraitExt::InstanceRandom::Salt(), uid](unsigned step) -> unsigned
+    {
+        // splitmix32: nearby ids must not correlate, and UniqueIDs are adjacent
+        // integers by construction.
+        unsigned x = salt ^ (uid * 0x9E3779B9u) ^ (step * 0x85EBCA6Bu);
+        x ^= x >> 16; x *= 0x7FEB352Du;
+        x ^= x >> 15; x *= 0x846CA68Bu;
+        x ^= x >> 16;
+        return x;
+    };
+
     const int poolN = static_cast<int>(pPool->Traits.size());
-    const int count = (pPool->CountMax > pPool->CountMin)
-        ? pScen->Random.RandomRanged(pPool->CountMin, pPool->CountMax)
+    const int span = pPool->CountMax - pPool->CountMin + 1;
+    const int count = (span > 1)
+        ? pPool->CountMin + static_cast<int>(unitRand(0) % static_cast<unsigned>(span))
         : pPool->CountMin;
 
     // Partial Fisher-Yates over indices, drawing from the SYNCED generator.
@@ -429,7 +467,8 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
             int total = 0;
             for (int k = i; k < poolN; ++k)
                 total += pPool->Traits[idx[k]]->Weight;
-            int roll = pScen->Random.RandomRanged(0, (total > 0 ? total : 1) - 1);
+            int roll = static_cast<int>(unitRand(1 + i)
+                % static_cast<unsigned>(total > 0 ? total : 1));
             for (int k = i; k < poolN; ++k)
             {
                 roll -= pPool->Traits[idx[k]]->Weight;
@@ -438,7 +477,8 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
         }
         else
         {
-            j = pScen->Random.RandomRanged(i, poolN - 1);
+            j = i + static_cast<int>(unitRand(1 + i)
+                % static_cast<unsigned>(poolN - i));
         }
         const int tmp = idx[i]; idx[i] = idx[j]; idx[j] = tmp;
 

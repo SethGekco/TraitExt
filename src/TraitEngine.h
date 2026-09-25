@@ -281,6 +281,11 @@ namespace TraitExt
 
     namespace InstanceRandom
     {
+        // The per-match salt the load-time draw used. Exposed so the per-INSTANCE
+        // draw can be a pure function of (salt, unit UniqueID) instead of a
+        // sequential pull from the synced RNG. See Hooks.InstanceRandom.cpp.
+        unsigned Salt();
+
         // Registered at load; looked up by TechnoType ID at runtime.
         const InstancePool* Find(const char* typeID);
         bool Any();
