@@ -35,6 +35,10 @@ namespace TraitExt
     {
         // Trait defs must outlive ProcessINI because instance pools point at
         // them for the whole match.
+        // Per-match salt, published for the per-instance draw. Declared here
+        // because InstanceRandom::Salt() reads it well before the load-time
+        // state further down is declared.
+        unsigned g_Salt = 0;
         std::unordered_map<std::string, TraitDef> g_Traits;
         std::unordered_map<std::string, InstancePool> g_InstancePools;
     }
@@ -1311,7 +1315,6 @@ namespace TraitExt
         // Names that actually reached a target this run. Anything declared and
         // never applied is almost always the real reason a test "did nothing".
         std::unordered_set<std::string> g_TraitsApplied;
-        unsigned g_Salt = 0;
         // Family coherence: switch OFF a family the donor does not use, so the
         // target's own setting cannot contradict the values just copied. On by
         // default because the failures it prevents are invisible (a body with
