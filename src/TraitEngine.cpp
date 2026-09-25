@@ -975,6 +975,52 @@ namespace TraitExt
             std::string gavePrimary, gaveSecondary;
             bool gaveWeaponN = false;
 
+            // Does the trait touch weapons at all?
+            bool traitHasWeapon = false;
+            for (const auto& te : def.Entries)
+                if (IsWeaponKey(te.first.c_str())) { traitHasWeapon = true; break; }
+
+            // If so, copy the BASE's ENTIRE weapon declaration onto the clone
+            // first, so the clone is self-contained and the trait's own keys
+            // then overwrite individual slots.
+            //
+            // Why not just let $Inherits supply it: measured, it does not.
+            // FV$0 was written with Weapon1=Comet and $Inherits=FV, and parsed
+            // with WeaponCount=0 while its base had WeaponCount=17 - so every
+            // slot came out null, because WeaponN is only read when
+            // WeaponCount>0. MTNK$C0 lost its inherited Primary the same way.
+            // This is the same reason the TURRET family is copied explicitly
+            // rather than inherited: a partial weapon declaration is not a
+            // smaller version of the base, it is a broken type.
+            if (traitHasWeapon)
+            {
+                static const char* const kDecl[] = {
+                    "WeaponCount", "Gunner", "IsGattling",
+                    "Primary", "Secondary", "ElitePrimary", "EliteSecondary",
+                };
+                for (const char* k : kDecl)
+                {
+                    const std::string v = ReadKey(pINI, target.c_str(), k);
+                    if (!v.empty())
+                        pINI->WriteString(cloneID.c_str(), k, v.c_str());
+                }
+                int carried = 0;
+                for (int i = 1; i <= 18; ++i)
+                {
+                    char key[24];
+                    std::snprintf(key, sizeof(key), "Weapon%d", i);
+                    std::string v = ReadKey(pINI, target.c_str(), key);
+                    if (!v.empty()) { pINI->WriteString(cloneID.c_str(), key, v.c_str()); ++carried; }
+                    std::snprintf(key, sizeof(key), "EliteWeapon%d", i);
+                    v = ReadKey(pINI, target.c_str(), key);
+                    if (!v.empty()) { pINI->WriteString(cloneID.c_str(), key, v.c_str()); ++carried; }
+                }
+                if (carried)
+                    Debug::Log("[TraitExt]   %s: carried %d weapon slot(s) over from '%s' "
+                        "so the variant's own slot replaces one rather than "
+                        "emptying the list\n", cloneID.c_str(), carried, target.c_str());
+            }
+
             for (const auto& te : def.Entries)
             {
                 const char* k = te.first.c_str();
@@ -1082,6 +1128,36 @@ namespace TraitExt
                     def.ForceWeapon[0] == 'y' || def.ForceWeapon[0] == 'Y'
                     || def.ForceWeapon[0] == 't' || def.ForceWeapon[0] == 'T'
                     || def.ForceWeapon[0] == '1');
+
+            // WeaponN is only read when WeaponCount covers it, so a declared
+            // slot with too small a count is silently dropped - which is exactly
+            // how FV$0 ended up with every slot null.
+            if (gaveWeaponN)
+            {
+                int highest = 0;
+                for (const auto& te : def.Entries)
+                {
+                    const char* k = te.first.c_str();
+                    const char* digits = nullptr;
+                    if (!_strnicmp(k, "EliteWeapon", 11)) digits = k + 11;
+                    else if (!_strnicmp(k, "Weapon", 6))  digits = k + 6;
+                    if (digits && *digits >= '1' && *digits <= '9')
+                    {
+                        const int nn = std::atoi(digits);
+                        if (nn > highest) highest = nn;
+                    }
+                }
+                const int have = std::atoi(ReadKey(pINI, cloneID.c_str(), "WeaponCount").c_str());
+                if (highest > have)
+                {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "%d", highest);
+                    pINI->WriteString(cloneID.c_str(), "WeaponCount", buf);
+                    Debug::Log("[TraitExt]   %s: WeaponCount %d -> %d so the declared "
+                        "Weapon%d slot is actually read\n",
+                        cloneID.c_str(), have, highest, highest);
+                }
+            }
 
             if (!gavePrimary.empty() && !gaveWeaponN)
             {
