@@ -416,9 +416,30 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
     for (int i = 0; i < poolN; ++i)
         idx[i] = i;
 
+    // Weighted draw over the not-yet-taken indices, still from the SYNCED
+    // generator so every client resolves the same unit the same way. Uniform
+    // used to be baked in; Weight= makes "rare variant" expressible.
+    const bool weighted = !pPool->CumWeight.empty();
+
     for (int i = 0; i < count && i < poolN; ++i)
     {
-        const int j = pScen->Random.RandomRanged(i, poolN - 1);
+        int j = i;
+        if (weighted)
+        {
+            int total = 0;
+            for (int k = i; k < poolN; ++k)
+                total += pPool->Traits[idx[k]]->Weight;
+            int roll = pScen->Random.RandomRanged(0, (total > 0 ? total : 1) - 1);
+            for (int k = i; k < poolN; ++k)
+            {
+                roll -= pPool->Traits[idx[k]]->Weight;
+                if (roll < 0) { j = k; break; }
+            }
+        }
+        else
+        {
+            j = pScen->Random.RandomRanged(i, poolN - 1);
+        }
         const int tmp = idx[i]; idx[i] = idx[j]; idx[j] = tmp;
 
         const int chosen = idx[i];

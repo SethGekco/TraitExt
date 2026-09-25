@@ -41,6 +41,7 @@ below (which are consumed by TraitExt and never written to targets).
 | `NearNot=` | `yes` inverts the proximity gate: applies while **nothing** is near |
 | `RequireAmmoBelow=` | only while the unit has this much ammo or less |
 | `BlockedFor=` | targets this trait REFUSES — the mirror of a target's `BlockTraits=` |
+| `Weight=` | relative likelihood in a random pool (default 1; `3` = three times as likely) |
 
 All gates combine — every gate present must hold. Any one alone is fine too.
 
@@ -226,6 +227,25 @@ in for the draw** versus everything else.
 
 Both scopes can run on the same unit: Type for the price and stats that vary per
 match, Instance for per-unit looks.
+
+**Random pools are weighted.** `Weight=` sets relative likelihood; default 1 is
+even odds. This is the one thing the data side cannot fake — repeating a name in
+a pool is rejected as a duplicate — so a "rare" variant needs the key.
+
+```ini
+[T_Common]
+RandomPoolFor=MTNK
+Weight=8
+Image=GTNK
+
+[T_Rare]                    ; roughly 1 in 9
+RandomPoolFor=MTNK
+Weight=1
+Image=SREF
+```
+
+Applies to both scopes, and the instance draw still comes from the synced
+generator so every client resolves the same unit the same way.
 
 **Type scope draws ONCE per match.** A `RandomScope=Type` weapon pool gives every
 unit of that type the same weapon for the whole game (it varies between matches,

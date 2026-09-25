@@ -103,6 +103,11 @@ namespace TraitExt
         // Trait-side refusal, the mirror of the target's BlockTraits=. Lets a
         // broadly-applied trait carve out exceptions without editing the units.
         std::vector<std::string> BlockedFor;
+        // Relative likelihood inside a random pool. 1 = even odds with every
+        // other member; 3 = three times as likely. Uniform pools are the one
+        // thing an author cannot fix from the data side by repeating entries,
+        // because a repeated name is caught as a duplicate.
+        int Weight = 1;
         // Author order is preserved: fold order is declaration order.
         std::vector<std::pair<std::string, std::string>> Entries;
         // Per-key mode overrides from "<Key>.Merge=" inside the trait section.
@@ -129,6 +134,9 @@ namespace TraitExt
     struct InstancePool
     {
         std::vector<const TraitDef*> Traits;
+        // Parallel to Traits: the cumulative weight ladder, so a draw is one
+        // comparison walk rather than a rebuild every time.
+        std::vector<int> CumWeight;
         // Parallel to Traits. Image is TYPE-level, so a per-unit look needs a
         // real second type: for any pooled trait that sets Image we synthesise
         // a clone type ($Inherits the target, differing only in Image) and swap

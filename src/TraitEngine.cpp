@@ -1566,7 +1566,7 @@ namespace TraitExt
             "ForceWeapon", "ForceBodyFacing", "BlockedFor",
             "NearTypes", "NearRange", "NearOwner", "NearCount", "NearNot",
             "RequirePower", "RequireNot", "RequireHealthBelow",
-            "RequireVeterancy", "RequireAmmoBelow",
+            "RequireVeterancy", "RequireAmmoBelow", "Weight",
         };
 
         bool IsReservedTraitKey(const char* key)
@@ -1682,6 +1682,20 @@ namespace TraitExt
             def.NearNot = ReadKey(pINI, name.c_str(), "NearNot");
             def.RequireAmmoBelow = ReadKey(pINI, name.c_str(), "RequireAmmoBelow");
             def.BlockedFor = SplitCSV(ReadKey(pINI, name.c_str(), "BlockedFor"));
+            {
+                const std::string w = ReadKey(pINI, name.c_str(), "Weight");
+                def.Weight = w.empty() ? 1 : std::atoi(w.c_str());
+                if (def.Weight < 1)
+                {
+                    // Weight=0 would be "never", which is what commenting the
+                    // trait out already says more clearly - and a zero in the
+                    // ladder makes an unreachable rung rather than an error.
+                    Debug::Log("[TraitExt] WARN trait '%s': Weight=%s is not >= 1; "
+                        "using 1. To exclude it, remove it from the pool.\n",
+                        name.c_str(), w.c_str());
+                    def.Weight = 1;
+                }
+            }
 
             // A trait that BOTH gates on veterancy and sets it feeds back into
             // its own condition, which oscillates instead of settling.
@@ -2191,6 +2205,9 @@ namespace TraitExt
                             continue;
                         }
                         ip.Traits.push_back(&it->second);
+                        ip.CumWeight.push_back(
+                            (ip.CumWeight.empty() ? 0 : ip.CumWeight.back())
+                            + it->second.Weight);
 
                         // A per-unit variant needs a real second type to carry
                         // the differing values, because Image and the weapon
@@ -2333,7 +2350,26 @@ namespace TraitExt
                     for (int i = 0; i < pick && i < static_cast<int>(pool.size()); ++i)
                     {
                         const int remaining = static_cast<int>(pool.size()) - i;
-                        const int j = i + static_cast<int>(NextRand(state) % static_cast<std::uint32_t>(remaining));
+                        // Weighted pick over the remaining entries. Uniform
+                        // was a hidden policy: an author asking for "rare"
+                        // could only fake it by repeating a name, which the
+                        // duplicate check rejects.
+                        int total = 0;
+                        for (int k = i; k < static_cast<int>(pool.size()); ++k)
+                        {
+                            const auto wt = traits.find(pool[k]);
+                            total += (wt == traits.end()) ? 1 : wt->second.Weight;
+                        }
+                        int roll = static_cast<int>(NextRand(state)
+                            % static_cast<std::uint32_t>(total > 0 ? total : 1));
+                        int j = i;
+                        for (int k = i; k < static_cast<int>(pool.size()); ++k)
+                        {
+                            const auto wt = traits.find(pool[k]);
+                            roll -= (wt == traits.end()) ? 1 : wt->second.Weight;
+                            if (roll < 0) { j = k; break; }
+                        }
+                        (void)remaining;
                         std::swap(pool[i], pool[j]);
                         wanted.push_back(pool[i]);
                     }
