@@ -157,18 +157,36 @@ namespace
 
     // Gates on the unit's OWN state rather than its owner's. Health is a percent
     // so one threshold reads the same on a 300hp tank and a 2000hp one.
-    bool SelfMeets(TechnoClass* pThis, const TraitExt::ConditionalTrait& ct)
+    // `active` is whether this gate is ALREADY open for this unit. Threshold
+    // gates use it as a deadband: a unit hovering exactly at the line would
+    // otherwise flip every re-check - four times a second at a 15-frame cadence
+    // - and every flip re-applies art and weapon. So the line to OPEN is the
+    // author's number, and the line to CLOSE is that number plus the margin.
+    bool SelfMeets(TechnoClass* pThis, const TraitExt::ConditionalTrait& ct, bool active)
     {
         TechnoTypeClass* const pType = pThis ? pThis->GetTechnoType() : nullptr;
         if (!pType)
             return false;
+
+        const int margin = TraitExt::InstanceRandom::GateHysteresis();
 
         if (ct.HealthBelowPct > 0)
         {
             if (pType->Strength <= 0)
                 return false;
             const int pct = pThis->Health * 100 / pType->Strength;
-            if (pct > ct.HealthBelowPct)
+            const int limit = ct.HealthBelowPct + (active ? margin : 0);
+            if (pct > limit)
+                return false;
+        }
+
+        if (ct.HealthAbovePct >= 0)
+        {
+            if (pType->Strength <= 0)
+                return false;
+            const int pct = pThis->Health * 100 / pType->Strength;
+            const int limit = ct.HealthAbovePct - (active ? margin : 0);
+            if (pct < limit)
                 return false;
         }
 
@@ -186,11 +204,15 @@ namespace
                 return false;
         }
 
-        if (ct.MinVeterancy >= 0)
+        if (ct.MinVeterancy >= 0 || ct.MaxVeterancy >= 0)
         {
+            // Rank is discrete, so no deadband applies - there is no "just
+            // barely veteran" to oscillate around.
             const int rank = pThis->Veterancy.IsElite() ? 2
                 : pThis->Veterancy.IsVeteran() ? 1 : 0;
-            if (rank < ct.MinVeterancy)
+            if (ct.MinVeterancy >= 0 && rank < ct.MinVeterancy)
+                return false;
+            if (ct.MaxVeterancy >= 0 && rank > ct.MaxVeterancy)
                 return false;
         }
         return true;
@@ -281,6 +303,10 @@ namespace
             return;
         g_NextCondCheck[pThis] = now + 15;   // ~1s
 
+        // Read BEFORE the loop: the threshold gates need to know whether they
+        // are currently open to apply their deadband.
+        const unsigned was = g_CondActive.count(pThis) ? g_CondActive[pThis] : 0u;
+
         unsigned mask = 0;
         for (size_t i = 0; i < pList->size() && i < 32; ++i)
         {
@@ -292,11 +318,10 @@ namespace
                 && OwnerLacks(pThis, c.RequireNot)
                 && TraitExt::Conditional::NearMeets(pThis, c)
                 && PowerMeets(pThis, c)
-                && SelfMeets(pThis, c))
+                && SelfMeets(pThis, c, (was & (1u << i)) != 0))
                 mask |= (1u << i);
         }
 
-        const unsigned was = g_CondActive.count(pThis) ? g_CondActive[pThis] : 0u;
         if (mask == was)
             return;
         g_CondActive[pThis] = mask;

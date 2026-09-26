@@ -39,6 +39,10 @@ namespace TraitExt
         // because InstanceRandom::Salt() reads it well before the load-time
         // state further down is declared.
         unsigned g_Salt = 0;
+        // Deadband, in percentage points, for threshold gates. Without one a
+        // unit sitting AT the threshold flips the gate every re-check - twice a
+        // second - and each flip re-applies art and weapon.
+        int g_GateHysteresis = 5;
         std::unordered_map<std::string, TraitDef> g_Traits;
         std::unordered_map<std::string, InstancePool> g_InstancePools;
     }
@@ -538,6 +542,7 @@ namespace TraitExt
     namespace InstanceRandom
     {
         unsigned Salt() { return g_Salt; }
+        int GateHysteresis() { return g_GateHysteresis; }
 
         const InstancePool* Find(const char* typeID)
         {
@@ -1407,7 +1412,8 @@ namespace TraitExt
                 || !def.RequirePower.empty() || !def.RequireNot.empty()
                 || !def.RequireHealthBelow.empty() || !def.RequireVeterancy.empty()
                 || !def.RequireAmmoBelow.empty()
-                || !def.RequirePassengers.empty();
+                || !def.RequirePassengers.empty()
+                || !def.RequireHealthAbove.empty() || !def.RequireVeterancyMax.empty();
         }
 
         void ExpandInheritFrom(CCINIClass* pINI,
@@ -1632,7 +1638,8 @@ namespace TraitExt
             "ForceWeapon", "ForceBodyFacing", "BlockedFor",
             "NearTypes", "NearRange", "NearOwner", "NearCount", "NearNot",
             "RequirePower", "RequireNot", "RequireHealthBelow",
-            "RequireVeterancy", "RequireAmmoBelow", "Weight",
+            "RequireVeterancy", "RequireVeterancyMax", "RequireHealthAbove",
+            "RequireAmmoBelow", "Weight",
             "Cameo", "AltCameo", "RequirePassengers",
         };
 
@@ -1698,6 +1705,10 @@ namespace TraitExt
             return;
         }
 
+        {
+            const std::string h = ReadKey(pINI, SectConfig, "GateHysteresis", "5");
+            g_GateHysteresis = (std::max)(0, std::atoi(h.c_str()));
+        }
         g_ForceWeaponDefault =
             ReadKey(pINI, SectConfig, "ForceWeapon", "no")[0] == 'y'
             || ReadKey(pINI, SectConfig, "ForceWeapon", "no")[0] == 'Y';
@@ -1744,7 +1755,9 @@ namespace TraitExt
             def.RequirePower = ReadKey(pINI, name.c_str(), "RequirePower");
             def.RequireNot = SplitCSV(ReadKey(pINI, name.c_str(), "RequireNot"));
             def.RequireHealthBelow = ReadKey(pINI, name.c_str(), "RequireHealthBelow");
+            def.RequireHealthAbove = ReadKey(pINI, name.c_str(), "RequireHealthAbove");
             def.RequireVeterancy = ReadKey(pINI, name.c_str(), "RequireVeterancy");
+            def.RequireVeterancyMax = ReadKey(pINI, name.c_str(), "RequireVeterancyMax");
             def.NearCount = ReadKey(pINI, name.c_str(), "NearCount");
             def.NearNot = ReadKey(pINI, name.c_str(), "NearNot");
             def.RequireAmmoBelow = ReadKey(pINI, name.c_str(), "RequireAmmoBelow");
@@ -1988,9 +2001,17 @@ namespace TraitExt
                 ct.RequireNot = def.RequireNot;
                 if (!def.RequireHealthBelow.empty())
                     ct.HealthBelowPct = std::atoi(def.RequireHealthBelow.c_str());
+                if (!def.RequireHealthAbove.empty())
+                    ct.HealthAbovePct = std::atoi(def.RequireHealthAbove.c_str());
+                auto rank = [](const std::string& v) -> int
+                {
+                    return !_stricmp(v.c_str(), "elite") ? 2
+                        : !_stricmp(v.c_str(), "veteran") ? 1 : 0;
+                };
                 if (!def.RequireVeterancy.empty())
-                    ct.MinVeterancy = !_stricmp(def.RequireVeterancy.c_str(), "elite") ? 2
-                        : !_stricmp(def.RequireVeterancy.c_str(), "veteran") ? 1 : 0;
+                    ct.MinVeterancy = rank(def.RequireVeterancy);
+                if (!def.RequireVeterancyMax.empty())
+                    ct.MaxVeterancy = rank(def.RequireVeterancyMax);
                 if (!def.RequirePassengers.empty())
                     ct.MinPassengers = std::atoi(def.RequirePassengers.c_str());
                 if (!def.RequireAmmoBelow.empty())

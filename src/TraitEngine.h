@@ -94,7 +94,9 @@ namespace TraitExt
         // Self-state gates, judged on the unit itself rather than its owner.
         // Health is a PERCENT so it reads the same for every unit.
         std::string RequireHealthBelow;
-        std::string RequireVeterancy;   // rookie | veteran | elite
+        std::string RequireHealthAbove;
+        std::string RequireVeterancy;    // rookie | veteran | elite -- and above
+        std::string RequireVeterancyMax; // ... and below
         // Proximity refinements: how MANY must be in range, and whether the
         // gate is inverted ("while nothing of this type is near").
         std::string NearCount;
@@ -260,7 +262,9 @@ namespace TraitExt
         Power NeedPower = Power::Ignore;
         std::vector<std::string> RequireNot;
         int HealthBelowPct = 0;         // 0 = no health gate
+        int HealthAbovePct = -1;        // -1 = no gate
         int MinVeterancy = -1;          // -1 = no rank gate; 0/1/2
+        int MaxVeterancy = -1;
         int NearCountMin = 1;
         int AmmoBelow = -1;             // -1 = no ammo gate
         int MinPassengers = -1;         // -1 = no passenger gate
@@ -299,6 +303,8 @@ namespace TraitExt
         // draw can be a pure function of (salt, unit UniqueID) instead of a
         // sequential pull from the synced RNG. See Hooks.InstanceRandom.cpp.
         unsigned Salt();
+        // Deadband in percentage points for threshold gates (see the .cpp).
+        int GateHysteresis();
 
         // Registered at load; looked up by TechnoType ID at runtime.
         const InstancePool* Find(const char* typeID);

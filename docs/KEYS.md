@@ -36,7 +36,9 @@ below (which are consumed by TraitExt and never written to targets).
 | `RequirePower=` | `yes` = only while the owner's base has FULL power; `no` = only while it is in LOW power |
 | `RequireNot=` | the owner must have **none** of these — the "while you lack X" case |
 | `RequireHealthBelow=` | only while the unit is at or below this **percent** health |
+| `RequireHealthAbove=` | only while at or above this percent |
 | `RequireVeterancy=` | only at this rank or above: `rookie`, `veteran`, `elite` |
+| `RequireVeterancyMax=` | only at this rank or **below** — pair them for an exact rank |
 | `NearCount=` | how many must be in range (default 1) |
 | `NearNot=` | `yes` inverts the proximity gate: applies while **nothing** is near |
 | `RequireAmmoBelow=` | only while the unit has this much ammo or less |
@@ -69,6 +71,13 @@ NearCount=4
 
 ⚠ A trait must not gate on `RequireVeterancy` **and** set `Veterancy` — it would
 re-trigger its own condition. TraitExt warns at load.
+
+**Threshold gates have a deadband.** A unit sitting exactly at
+`RequireHealthBelow=35` would otherwise flip the gate on every re-check — four
+times a second — re-applying art and weapon each time. So the gate OPENS at your
+number and CLOSES 5 points past it. Tune with `[TraitExt] GateHysteresis=5`; `0`
+restores the raw comparison. Rank gates have no deadband, since there is no
+"just barely veteran" to oscillate around.
 
 `RequirePower=no` is the "powered unit" case: the unit converts when the base
 browns out, and converts back when power is restored. Power is a HOUSE property,
@@ -206,6 +215,7 @@ MixedTurrets=yes        ; kill switch for TurretFrom
 InheritExcept=          ; keys/families every InheritFrom skips by default
 InheritFamilyCoherence=yes ; switch off families the donor doesn't use
 ForceWeapon=no          ; default for variants: does their gun beat the asked-for slot
+GateHysteresis=5        ; deadband (percentage points) for threshold gates; 0 = off
 TargetLists=            ; extra list sections to scan
 
 [TraitTargets]          ; individual sections to treat as targets
