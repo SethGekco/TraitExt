@@ -44,6 +44,8 @@
 #include <InfantryClass.h>
 #include <InfantryTypeClass.h>
 #include <unordered_map>
+#include <map>
+#include <utility>
 #include <cmath>
 #include <ScenarioClass.h>
 #include <Fundamentals.h>   // Unsorted::CurrentFrame
@@ -62,6 +64,11 @@ namespace
     // are currently satisfied for it.
     std::unordered_map<void*, int> g_NextCondCheck;
     std::unordered_map<void*, unsigned> g_CondActive;
+
+    // Veterancy a gate overwrote, so closing the gate can put it back.
+    // Keyed (unit, trait index) because several gates may touch one unit.
+    struct VetSave { float Before; float Applied; };
+    std::map<std::pair<void*, int>, VetSave> g_VetSaved;
 
     // Cosmetic re-roll RNG. Deliberately LOCAL, not ScenarioClass::Random:
     // appearance is unsynced by design, and drawing from the synced generator
@@ -354,9 +361,19 @@ namespace
             return;
         g_CondActive[pThis] = mask;
 
-        // Appearance follows the gate both ways; stats are applied when the
-        // gate opens and deliberately NOT rolled back when it closes, because
-        // un-applying a fold is not generally possible.
+        // Appearance and weapon follow the gate both ways. VETERANCY now does
+        // too: it is a single scalar the gate overwrote, so the old value can be
+        // put back. Rex hit the old behaviour - an aura granted elite, the unit
+        // drove out of range, and it stayed elite forever, which made every
+        // gated stat a one-way door.
+        //
+        // Health and Ammo are still NOT rolled back, and that is deliberate
+        // rather than laziness: gameplay moves them constantly, so restoring a
+        // remembered value would fight the game rather than undo the trait.
+        //
+        // The restore is CONDITIONAL on the value still being the one we wrote.
+        // If the unit earned a promotion while the gate was open, putting the
+        // old rank back would destroy a legitimate gain, so we leave it alone.
         bool tookLook = false;
         for (size_t i = 0; i < pList->size() && i < 32; ++i)
         {
@@ -370,6 +387,21 @@ namespace
             {
                 Debug::Log("[TraitExt] (unlock) %s @%p: '%s' satisfied\n",
                     pType->ID, pThis, ct.Def->Name.c_str());
+
+                // Remember the rank BEFORE the trait overwrites it, so closing
+                // the gate can undo exactly what opening it did.
+                for (const auto& e : ct.Def->Entries)
+                {
+                    if (_stricmp(e.first.c_str(), "Veterancy") != 0)
+                        continue;
+                    double want = 0.0;
+                    if (!ParseDouble(e.second.c_str(), want))
+                        break;
+                    g_VetSaved[{ pThis, static_cast<int>(i) }] =
+                        VetSave { pThis->Veterancy.Veterancy, static_cast<float>(want) };
+                    break;
+                }
+
                 ApplyOneTrait(pThis, ct.Def, !ct.CloneID.empty());
                 if (!ct.CloneID.empty())
                 {
@@ -382,6 +414,30 @@ namespace
             {
                 Debug::Log("[TraitExt] (unlock) %s @%p: '%s' no longer satisfied\n",
                     pType->ID, pThis, ct.Def->Name.c_str());
+
+                const auto vit = g_VetSaved.find({ pThis, static_cast<int>(i) });
+                if (vit != g_VetSaved.end())
+                {
+                    // Only undo our own write. If the unit earned a promotion
+                    // while the gate was open, the current value is no longer
+                    // the one we set, and putting the old rank back would
+                    // destroy a legitimate gain.
+                    const float now = pThis->Veterancy.Veterancy;
+                    if (std::fabs(now - vit->second.Applied) < 0.01f)
+                    {
+                        pThis->Veterancy.Veterancy = vit->second.Before;
+                        Debug::Log("[TraitExt]   %s @%p: veterancy restored %.2f -> %.2f\n",
+                            pType->ID, pThis, now, vit->second.Before);
+                    }
+                    else
+                    {
+                        Debug::Log("[TraitExt]   %s @%p: veterancy left at %.2f - it "
+                            "changed since the gate opened (we set %.2f), so it was "
+                            "earned, not ours to undo\n",
+                            pType->ID, pThis, now, vit->second.Applied);
+                    }
+                    g_VetSaved.erase(vit);
+                }
             }
         }
 
@@ -1110,6 +1166,8 @@ DEFINE_HOOK(0x6F4500, TechnoClass_DTOR_InstanceRandom, 0x5)
     {
         g_Seen.erase(pThis);
         g_NextReroll.erase(pThis);
+        for (auto it = g_VetSaved.begin(); it != g_VetSaved.end(); )
+            it = (it->first.first == static_cast<void*>(pThis)) ? g_VetSaved.erase(it) : ++it;
         g_NextCondCheck.erase(pThis);
         g_CondActive.erase(pThis);
         TraitExt::VariantArt::Forget(pThis);

@@ -329,12 +329,13 @@ TraitExt reports the two mistakes that look like a broken feature:
   default/empty slot) instead. TraitExt now warns at load when a trait sets
   `Primary=`/`Secondary=` on such a type. The Prism Tank is the same shape:
   `WeaponCount=1` with `Weapon1=Comet` and `Primary=` commented out.
-* **Gated STATS do not roll back when the gate closes.** Appearance and weapon
-  follow the gate both ways, but `Veterancy`/`Health`/`Ammo` are applied when it
-  opens and left alone when it shuts — un-applying a fold is not generally
-  possible. So a unit that drives out of a `NearTypes=` radius keeps the
-  veterancy it gained. Use proximity gates for looks and weapons; treat any stat
-  bonus from one as permanent.
+* **`Veterancy` now reverts when a gate closes; `Health` and `Ammo` do not.**
+  A gate that grants rank puts the old rank back when it shuts — but only if the
+  value is still the one it wrote. If the unit earned a promotion while the gate
+  was open, the gain is left alone rather than destroyed, and the log says which
+  happened. `Health`/`Ammo` are deliberately one-way: gameplay moves them
+  constantly, so restoring a remembered number would fight the game rather than
+  undo the trait.
 ### Cameos — `Cameo=`
 
 `Cameo=` is normally an **artmd.ini** key, which TraitExt never reads, so a trait
