@@ -41,6 +41,10 @@ namespace TraitExt
         // Inverse assignment: the trait names its own targets, so a trait can be
         // applied without editing the target section at all.
         std::vector<std::string> AppliesTo;
+        // Whole LIST sections to apply to - VehicleTypes, InfantryTypes, etc.
+        // Expanded into AppliesTo at load, so "every vehicle gets this" is one
+        // line instead of a hand-maintained roster that drifts as the mod grows.
+        std::vector<std::string> AppliesToList;
         // Inverse random-pool membership: "this trait is one option in these
         // targets' random pools". Same motivation as AppliesTo — keeps all
         // trait config in one place instead of scattered across unit sections.
@@ -91,6 +95,11 @@ namespace TraitExt
         // Gate NEGATION: the owner must have NONE of these. Lets a trait be the
         // "while you lack X" case, which Requirement= cannot express.
         std::vector<std::string> RequireNot;
+        // Country gate, judged on the unit's OWNER. Faction-specific variants
+        // are impossible at type level - a TechnoType is shared by every house -
+        // so this has to be a per-unit gate like the rest.
+        std::vector<std::string> RequireCountry;
+        std::vector<std::string> RequireCountryNot;
         // Self-state gates, judged on the unit itself rather than its owner.
         // Health is a PERCENT so it reads the same for every unit.
         std::string RequireHealthBelow;
@@ -261,6 +270,8 @@ namespace TraitExt
         Whose NearOwner = Whose::Owner;
         Power NeedPower = Power::Ignore;
         std::vector<std::string> RequireNot;
+        std::vector<std::string> Country;
+        std::vector<std::string> CountryNot;
         int HealthBelowPct = 0;         // 0 = no health gate
         int HealthAbovePct = -1;        // -1 = no gate
         int MinVeterancy = -1;          // -1 = no rank gate; 0/1/2

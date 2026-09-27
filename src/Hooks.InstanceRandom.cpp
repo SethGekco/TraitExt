@@ -38,6 +38,7 @@
 #include <BuildingClass.h>
 #include <BuildingTypeClass.h>
 #include <HouseClass.h>
+#include <HouseTypeClass.h>    // country gate reads HouseClass::Type->ID
 #include <UnitClass.h>
 #include <UnitTypeClass.h>
 #include <InfantryClass.h>
@@ -153,6 +154,32 @@ namespace
                 return false;
         }
         return true;
+    }
+
+    // Country gate. A TechnoType is shared by every house, so "Americans get a
+    // different Grizzly" cannot be done at type level at all - it has to be
+    // judged per unit against the owner's country, exactly like Requirement=.
+    bool CountryMeets(TechnoClass* pThis, const TraitExt::ConditionalTrait& ct)
+    {
+        if (ct.Country.empty() && ct.CountryNot.empty())
+            return true;
+
+        HouseClass* const pOwner = pThis ? pThis->Owner : nullptr;
+        if (!pOwner || !pOwner->Type)
+            return false;
+
+        const char* const id = pOwner->Type->ID;
+
+        for (const auto& no : ct.CountryNot)
+            if (!_stricmp(no.c_str(), id))
+                return false;
+
+        if (ct.Country.empty())
+            return true;
+        for (const auto& yes : ct.Country)
+            if (!_stricmp(yes.c_str(), id))
+                return true;
+        return false;
     }
 
     // Gates on the unit's OWN state rather than its owner's. Health is a percent
@@ -318,6 +345,7 @@ namespace
                 && OwnerLacks(pThis, c.RequireNot)
                 && TraitExt::Conditional::NearMeets(pThis, c)
                 && PowerMeets(pThis, c)
+                && CountryMeets(pThis, c)
                 && SelfMeets(pThis, c, (was & (1u << i)) != 0))
                 mask |= (1u << i);
         }

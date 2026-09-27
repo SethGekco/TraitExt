@@ -1413,7 +1413,8 @@ namespace TraitExt
                 || !def.RequireHealthBelow.empty() || !def.RequireVeterancy.empty()
                 || !def.RequireAmmoBelow.empty()
                 || !def.RequirePassengers.empty()
-                || !def.RequireHealthAbove.empty() || !def.RequireVeterancyMax.empty();
+                || !def.RequireHealthAbove.empty() || !def.RequireVeterancyMax.empty()
+                || !def.RequireCountry.empty() || !def.RequireCountryNot.empty();
         }
 
         void ExpandInheritFrom(CCINIClass* pINI,
@@ -1639,6 +1640,7 @@ namespace TraitExt
             "NearTypes", "NearRange", "NearOwner", "NearCount", "NearNot",
             "RequirePower", "RequireNot", "RequireHealthBelow",
             "RequireVeterancy", "RequireVeterancyMax", "RequireHealthAbove",
+            "AppliesToList", "RequireCountry", "RequireCountryNot",
             "RequireAmmoBelow", "Weight",
             "Cameo", "AltCameo", "RequirePassengers",
         };
@@ -1753,6 +1755,7 @@ namespace TraitExt
 
             def.Composes = SplitCSV(ReadKey(pINI, name.c_str(), "Traits"));
             def.AppliesTo = SplitCSV(ReadKey(pINI, name.c_str(), "AppliesTo"));
+            def.AppliesToList = SplitCSV(ReadKey(pINI, name.c_str(), "AppliesToList"));
             def.RandomPoolFor = SplitCSV(ReadKey(pINI, name.c_str(), "RandomPoolFor"));
             def.RandomScope = ReadKey(pINI, name.c_str(), "RandomScope");
             def.TurretFrom = ReadKey(pINI, name.c_str(), "TurretFrom");
@@ -1767,6 +1770,8 @@ namespace TraitExt
             def.NearOwner = ReadKey(pINI, name.c_str(), "NearOwner");
             def.RequirePower = ReadKey(pINI, name.c_str(), "RequirePower");
             def.RequireNot = SplitCSV(ReadKey(pINI, name.c_str(), "RequireNot"));
+            def.RequireCountry = SplitCSV(ReadKey(pINI, name.c_str(), "RequireCountry"));
+            def.RequireCountryNot = SplitCSV(ReadKey(pINI, name.c_str(), "RequireCountryNot"));
             def.RequireHealthBelow = ReadKey(pINI, name.c_str(), "RequireHealthBelow");
             def.RequireHealthAbove = ReadKey(pINI, name.c_str(), "RequireHealthAbove");
             def.RequireVeterancy = ReadKey(pINI, name.c_str(), "RequireVeterancy");
@@ -1870,6 +1875,42 @@ namespace TraitExt
         // Resolve InheritFrom before ANY folding: it only rewrites each trait's
         // own Entries, so every downstream path (fold, clone, gate) sees a
         // trait that looks hand-written.
+        // Expand list targets BEFORE anything reads AppliesTo. One line covering
+        // every vehicle beats a hand-maintained roster that silently goes stale
+        // as the mod grows.
+        for (auto& kv : traits)
+        {
+            TraitDef& def = kv.second;
+            for (const auto& listName : def.AppliesToList)
+            {
+                const int n = pINI->GetKeyCount(listName.c_str());
+                if (n <= 0)
+                {
+                    Debug::Log("[TraitExt] WARN trait '%s': AppliesToList names '%s', "
+                        "which is empty or not a list section\n",
+                        def.Name.c_str(), listName.c_str());
+                    continue;
+                }
+
+                int added = 0;
+                for (int i = 0; i < n; ++i)
+                {
+                    const char* const key = pINI->GetKeyName(listName.c_str(), i);
+                    if (!key)
+                        continue;
+                    const std::string id = ReadKey(pINI, listName.c_str(), key);
+                    if (id.empty())
+                        continue;
+                    bool seen = false;
+                    for (const auto& t : def.AppliesTo)
+                        if (!_stricmp(t.c_str(), id.c_str())) { seen = true; break; }
+                    if (!seen) { def.AppliesTo.push_back(id); ++added; }
+                }
+                Debug::Log("[TraitExt] trait '%s': AppliesToList '%s' added %d target(s)\n",
+                    def.Name.c_str(), listName.c_str(), added);
+            }
+        }
+
         ExpandInheritFrom(pINI, traits);
 
         // Seed selection. A FIXED seed means the same draw every launch forever,
@@ -2014,6 +2055,8 @@ namespace TraitExt
                 ct.Requirement = def.Requirement;
                 ct.NearTypes = def.NearTypes;
                 ct.RequireNot = def.RequireNot;
+                ct.Country = def.RequireCountry;
+                ct.CountryNot = def.RequireCountryNot;
                 if (!def.RequireHealthBelow.empty())
                     ct.HealthBelowPct = std::atoi(def.RequireHealthBelow.c_str());
                 if (!def.RequireHealthAbove.empty())

@@ -19,6 +19,7 @@ below (which are consumed by TraitExt and never written to targets).
 | `<Key>.Merge=` | fold mode for one key only |
 | `Traits=` | compose other traits into this one (cycle-checked) |
 | `AppliesTo=` | targets this trait applies to. **Also registers that section as a target**, which is how weapons/warheads work |
+| `AppliesToList=` | apply to every member of a list section — `VehicleTypes`, `InfantryTypes`, … |
 | `RandomPoolFor=` | targets whose random pool this trait belongs to |
 | `RandomScope=` | `Type` (default) or `Instance` for those pools |
 | `RerollInterval=` | morph cadence in frames, `N` or `min,max` |
@@ -35,6 +36,8 @@ below (which are consumed by TraitExt and never written to targets).
 | `NearOwner=` | whose objects count: `Owner` (default), `Ally`, `Enemy`, `Any` |
 | `RequirePower=` | `yes` = only while the owner's base has FULL power; `no` = only while it is in LOW power |
 | `RequireNot=` | the owner must have **none** of these — the "while you lack X" case |
+| `RequireCountry=` | only for units owned by these countries |
+| `RequireCountryNot=` | ... or by any country except these |
 | `RequireHealthBelow=` | only while the unit is at or below this **percent** health |
 | `RequireHealthAbove=` | only while at or above this percent |
 | `RequireVeterancy=` | only at this rank or above: `rookie`, `veteran`, `elite` |
@@ -48,6 +51,27 @@ below (which are consumed by TraitExt and never written to targets).
 | `RequirePassengers=` | only while at least this many passengers are aboard |
 
 All gates combine — every gate present must hold. Any one alone is fine too.
+
+**Faction-specific variants need `RequireCountry=`, not a type edit.** A
+TechnoType is shared by every house, so there is no type-level way to give one
+country a different Grizzly — it must be judged per unit against the owner:
+
+```ini
+[T_USGrizzly]
+AppliesTo=MTNK
+RequireCountry=Americans
+Image=HTNK
+```
+
+**`AppliesToList=` covers a whole class in one line**, and stays correct as the
+mod grows instead of drifting from a hand-kept roster:
+
+```ini
+[T_AllTanksTougher]
+AppliesToList=VehicleTypes
+Armor=heavy
+BlockedFor=HARV,AMCV        ; carve out the exceptions
+```
 
 ```ini
 [T_LastStand]               ; desperate form: hurt, and no Battle Lab left
