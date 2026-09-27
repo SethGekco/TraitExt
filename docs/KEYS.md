@@ -232,6 +232,7 @@ block and survives that.
 ```ini
 [TraitExt]
 Disable=no              ; yes = TraitExt does nothing at all this run
+Report=no               ; yes = log one summary line per trait (gates, payload, targets)
 RandomSeed=0            ; 0 = per-match. Non-zero pins a draw for repeatable tests
 KeepOriginalCameo=yes   ; keep the unit's own cameo when Image changes
 VariantArt=yes          ; kill switch for per-unit looks

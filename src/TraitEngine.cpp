@@ -25,6 +25,7 @@
 #include <cctype>
 #include <iterator>             // std::size
 #include <cmath>
+#include <string>
 #include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
@@ -43,6 +44,7 @@ namespace TraitExt
         // unit sitting AT the threshold flips the gate every re-check - twice a
         // second - and each flip re-applies art and weapon.
         int g_GateHysteresis = 5;
+        bool g_Report = false;
         std::unordered_map<std::string, TraitDef> g_Traits;
         std::unordered_map<std::string, InstancePool> g_InstancePools;
     }
@@ -1724,6 +1726,8 @@ namespace TraitExt
             const std::string h = ReadKey(pINI, SectConfig, "GateHysteresis", "5");
             g_GateHysteresis = (std::max)(0, std::atoi(h.c_str()));
         }
+        g_Report = ReadKey(pINI, SectConfig, "Report", "no")[0] == 'y'
+            || ReadKey(pINI, SectConfig, "Report", "no")[0] == 'Y';
         g_ForceWeaponDefault =
             ReadKey(pINI, SectConfig, "ForceWeapon", "no")[0] == 'y'
             || ReadKey(pINI, SectConfig, "ForceWeapon", "no")[0] == 'Y';
@@ -2772,6 +2776,74 @@ namespace TraitExt
 
         Debug::Log("[TraitExt] applied traits to %d target(s) from %d trait definition(s)\n",
             appliedTargets, static_cast<int>(traits.size()));
+
+        // Authoring report. With 18 traits staged at once, "what is actually
+        // live and what does each one do" is not something you can hold in your
+        // head, and reading it back out of the INI is exactly the error-prone
+        // step this replaces. Opt-in because it is one line per trait.
+        if (g_Report)
+        {
+            for (const auto& kv : traits)
+            {
+                const TraitDef& d = kv.second;
+
+                std::string gates;
+                auto gate = [&gates](const char* label, const std::string& v)
+                {
+                    if (v.empty()) return;
+                    if (!gates.empty()) gates += ' ';
+                    gates += label; gates += '='; gates += v;
+                };
+                auto gateList = [&gates](const char* label, const std::vector<std::string>& v)
+                {
+                    if (v.empty()) return;
+                    if (!gates.empty()) gates += ' ';
+                    gates += label; gates += '=';
+                    for (size_t i = 0; i < v.size(); ++i)
+                    { if (i) gates += ','; gates += v[i]; }
+                };
+                gateList("need", d.Requirement);
+                gateList("lack", d.RequireNot);
+                gateList("country", d.RequireCountry);
+                gateList("notCountry", d.RequireCountryNot);
+                gateList("near", d.NearTypes);
+                gate("nearRange", d.NearRange ? std::to_string(d.NearRange) : "");
+                gate("nearCount", d.NearCount);
+                gate("nearNot", d.NearNot);
+                gate("power", d.RequirePower);
+                gate("hpBelow", d.RequireHealthBelow);
+                gate("hpAbove", d.RequireHealthAbove);
+                gate("rankMin", d.RequireVeterancy);
+                gate("rankMax", d.RequireVeterancyMax);
+                gate("ammoBelow", d.RequireAmmoBelow);
+                gate("passengers", d.RequirePassengers);
+
+                std::string payload;
+                for (const auto& e : d.Entries)
+                {
+                    if (payload.size() > 120) { payload += ",..."; break; }
+                    if (!payload.empty()) payload += ',';
+                    payload += e.first;
+                }
+                if (!d.TurretFrom.empty()) { payload += payload.empty() ? "" : ","; payload += "TurretFrom"; }
+                if (!d.Cameo.empty())      { payload += payload.empty() ? "" : ","; payload += "Cameo"; }
+
+                std::string where;
+                for (size_t i = 0; i < d.AppliesTo.size() && i < 6; ++i)
+                { if (i) where += ','; where += d.AppliesTo[i]; }
+                if (d.AppliesTo.size() > 6)
+                    where += ",+" + std::to_string(d.AppliesTo.size() - 6) + " more";
+                for (const auto& r : d.RandomPoolFor)
+                { if (!where.empty()) where += ','; where += "pool:" + r; }
+
+                Debug::Log("[TraitExt] REPORT %-14s %s | gates{%s} | sets{%s} | on{%s}\n",
+                    d.Name.c_str(),
+                    IsGated(d) ? "RUNTIME" : "load   ",
+                    gates.empty() ? "-" : gates.c_str(),
+                    payload.empty() ? "-" : payload.c_str(),
+                    where.empty() ? "(nothing)" : where.c_str());
+            }
+        }
 
         // The single most common false alarm in this project: a trait is staged,
         // the run looks wrong, and the trait was never wired to anything. Gated
