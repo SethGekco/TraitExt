@@ -234,6 +234,20 @@ namespace
                 return false;
         }
 
+        if (!ct.Missions.empty())
+        {
+            // MissionClass::CurrentMission. Mission names were resolved to enum
+            // values at load, checked against GeneralDefinitions.h rather than
+            // guessed, so an unknown name warns there instead of silently
+            // gating on the wrong mission here.
+            const int cur = static_cast<int>(pThis->CurrentMission);
+            bool hit = false;
+            for (const int m : ct.Missions)
+                if (m == cur) { hit = true; break; }
+            if (!hit)
+                return false;
+        }
+
         if (ct.MinPassengers >= 0)
         {
             // Passengers lives on TechnoClass (TechnoClass.h:597), not FootClass,
