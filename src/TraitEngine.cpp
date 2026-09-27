@@ -1655,6 +1655,19 @@ namespace TraitExt
         // one of these that is NOT reserved is almost certainly a misspelling.
         bool LooksLikeConfigKey(const char* key)
         {
+            // Real VANILLA keys that happen to start with one of our prefixes.
+            // RequiredHouses appears 4x in stock rulesmd, so the bare prefix
+            // test told an author their perfectly good key was a typo - the
+            // worst failure mode for a linter, because it teaches you to stop
+            // reading its output. Extend this list, do not loosen the check.
+            static const char* const kRealGameKeys[] = {
+                "RequiredHouses", "RequiredStructures", "RequiredAnim",
+                "NearFireCoords", "NearAnim",
+            };
+            for (const char* r : kRealGameKeys)
+                if (!_stricmp(key, r))
+                    return false;
+
             static const char* const kPrefixes[] = {
                 "Require", "Near", "Inherit", "RandomPool", "RandomScope",
                 "Reroll", "Blocked", "AppliesTo",
@@ -1822,9 +1835,11 @@ namespace TraitExt
                 // to configure simply never happens. Typos here have already
                 // cost whole test rounds in this project.
                 if (LooksLikeConfigKey(keyName))
-                    Debug::Log("[TraitExt] WARN trait '%s': key '%s' looks like a "
-                        "TraitExt config key but is not one - check the spelling. "
-                        "As written it will be applied to targets as DATA.\n",
+                    Debug::Log("[TraitExt] NOTE trait '%s': key '%s' resembles a "
+                        "TraitExt config key but is not one. If it is a real game key "
+                        "this is a false alarm and can be ignored; if it is a typo, "
+                        "the feature it was meant to configure will never happen and "
+                        "the key is applied to targets as DATA.\n",
                         name.c_str(), keyName);
                 if (keyName[0] == '$')
                     continue; // leave $Inherits and friends to Phobos
@@ -2411,6 +2426,15 @@ namespace TraitExt
                         Debug::Log("[TraitExt] %s: registered PER-INSTANCE pool of %d (count %d..%d)\n",
                             target.c_str(), poolN, ip.CountMin, ip.CountMax);
                     }
+                    // These ARE applied - per unit, at runtime. Recording that
+                    // here matters because the never-applied report runs off
+                    // this set, and an instance pool leaves this function by a
+                    // different door than the static fold below. Without it the
+                    // report cried wolf about every instance-scope trait, which
+                    // is worse than no report at all.
+                    for (const TraitDef* def : ip.Traits)
+                        g_TraitsApplied.insert(def->Name);
+
                     pool.clear(); // handled at runtime, not at load
                 }
 
