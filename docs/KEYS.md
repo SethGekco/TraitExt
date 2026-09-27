@@ -49,6 +49,7 @@ below (which are consumed by TraitExt and never written to targets).
 | `Weight=` | relative likelihood in a random pool (default 1; `3` = three times as likely) |
 | `Cameo=` / `AltCameo=` | set the sidebar cameo directly (see below) |
 | `RequirePassengers=` | only while at least this many passengers are aboard |
+| `RequireMission=` | only while the unit is doing one of these: `Attack`, `Move`, `Guard`, `AreaGuard`, `Harvest`, `Hunt`, `Patrol`, `Unload`, `Sleep`, … |
 
 All gates combine — every gate present must hold. Any one alone is fine too.
 

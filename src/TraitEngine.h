@@ -127,6 +127,10 @@ namespace TraitExt
         // At least this many passengers aboard. The natural gate for transports
         // and for a Gunner unit whose whole behaviour depends on its cargo.
         std::string RequirePassengers;
+        // Gate on what the unit is DOING. Names from the Mission enum -
+        // Attack, Move, Guard, Harvest, Hunt, Patrol, Unload, Sleep... - so a
+        // unit can look or shoot differently while fighting versus idling.
+        std::vector<std::string> RequireMission;
         // Author order is preserved: fold order is declaration order.
         std::vector<std::pair<std::string, std::string>> Entries;
         // Per-key mode overrides from "<Key>.Merge=" inside the trait section.
@@ -279,6 +283,7 @@ namespace TraitExt
         int NearCountMin = 1;
         int AmmoBelow = -1;             // -1 = no ammo gate
         int MinPassengers = -1;         // -1 = no passenger gate
+        std::vector<int> Missions;      // empty = no mission gate
         bool NearInvert = false;
         std::string CloneID;        // empty unless the trait changes appearance
     };

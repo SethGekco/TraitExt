@@ -1414,7 +1414,7 @@ namespace TraitExt
                 || !def.RequirePower.empty() || !def.RequireNot.empty()
                 || !def.RequireHealthBelow.empty() || !def.RequireVeterancy.empty()
                 || !def.RequireAmmoBelow.empty()
-                || !def.RequirePassengers.empty()
+                || !def.RequirePassengers.empty() || !def.RequireMission.empty()
                 || !def.RequireHealthAbove.empty() || !def.RequireVeterancyMax.empty()
                 || !def.RequireCountry.empty() || !def.RequireCountryNot.empty();
         }
@@ -1644,7 +1644,7 @@ namespace TraitExt
             "RequireVeterancy", "RequireVeterancyMax", "RequireHealthAbove",
             "AppliesToList", "RequireCountry", "RequireCountryNot",
             "RequireAmmoBelow", "Weight",
-            "Cameo", "AltCameo", "RequirePassengers",
+            "Cameo", "AltCameo", "RequirePassengers", "RequireMission",
         };
 
         bool IsReservedTraitKey(const char* key)
@@ -1787,6 +1787,7 @@ namespace TraitExt
             def.Cameo = ReadKey(pINI, name.c_str(), "Cameo");
             def.AltCameo = ReadKey(pINI, name.c_str(), "AltCameo");
             def.RequirePassengers = ReadKey(pINI, name.c_str(), "RequirePassengers");
+            def.RequireMission = SplitCSV(ReadKey(pINI, name.c_str(), "RequireMission"));
             {
                 const std::string w = ReadKey(pINI, name.c_str(), "Weight");
                 def.Weight = w.empty() ? 1 : std::atoi(w.c_str());
@@ -2074,6 +2075,30 @@ namespace TraitExt
                     ct.MinVeterancy = rank(def.RequireVeterancy);
                 if (!def.RequireVeterancyMax.empty())
                     ct.MaxVeterancy = rank(def.RequireVeterancyMax);
+                // Mission NAMES, resolved at load. An unknown name is an error
+                // worth reporting: it would otherwise gate on nothing and the
+                // trait would simply never fire.
+                for (const auto& mn : def.RequireMission)
+                {
+                    static const struct { const char* Name; int Value; } kMissions[] = {
+                        { "Sleep", 0 }, { "Attack", 1 }, { "Move", 2 }, { "QMove", 3 },
+                        { "Retreat", 4 }, { "Guard", 5 }, { "Sticky", 6 }, { "Enter", 7 },
+                        { "Capture", 8 }, { "Harvest", 10 }, { "AreaGuard", 11 },
+                        { "Return", 12 }, { "Stop", 13 }, { "Ambush", 14 }, { "Hunt", 15 },
+                        { "Unload", 16 }, { "Sabotage", 17 }, { "Construction", 18 },
+                        { "Selling", 19 }, { "Repair", 20 }, { "Rescue", 21 },
+                        { "Missile", 22 }, { "Harmless", 23 }, { "Open", 24 },
+                        { "Patrol", 25 },
+                    };
+                    bool found = false;
+                    for (const auto& m : kMissions)
+                        if (!_stricmp(m.Name, mn.c_str()))
+                        { ct.Missions.push_back(m.Value); found = true; break; }
+                    if (!found)
+                        Debug::Log("[TraitExt] WARN trait '%s': RequireMission '%s' is not a "
+                            "known mission name, so this gate can never open\n",
+                            def.Name.c_str(), mn.c_str());
+                }
                 if (!def.RequirePassengers.empty())
                     ct.MinPassengers = std::atoi(def.RequirePassengers.c_str());
                 if (!def.RequireAmmoBelow.empty())
