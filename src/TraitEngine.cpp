@@ -44,6 +44,10 @@ namespace TraitExt
         // unit sitting AT the threshold flips the gate every re-check - twice a
         // second - and each flip re-applies art and weapon.
         int g_GateHysteresis = 5;
+        // Minimum frames a gate stays open. The value deadband cannot help a
+        // proximity or mission gate - there is no value to widen - so those need
+        // a TIME deadband instead. 30 frames is about two seconds.
+        int g_GateDwell = 30;
         bool g_Report = false;
         std::unordered_map<std::string, TraitDef> g_Traits;
         std::unordered_map<std::string, InstancePool> g_InstancePools;
@@ -285,6 +289,38 @@ namespace TraitExt
         }
     }
 
+    namespace Diagnostics
+    {
+        // Its OWN entry point, not folded into CameoFix::Apply. The first
+        // version lived there and never ran, because Apply bails when
+        // g_CameoRestore is empty - a diagnostic hidden behind an unrelated
+        // feature's guard is the third instance of that mistake in this project.
+        void ReportParsedWeapons()
+        {
+            static bool s_done = false;
+            if (s_done || g_WeaponTargets.empty())
+                return;
+            s_done = true;
+
+            for (const auto& id : g_WeaponTargets)
+            {
+                TechnoTypeClass* const pT = TechnoTypeClass::Find(id.c_str());
+                if (!pT)
+                {
+                    Debug::Log("[TraitExt] PARSED %s: type NOT FOUND\n", id.c_str());
+                    continue;
+                }
+                Debug::Log("[TraitExt] PARSED %s: WeaponCount=%d TurretCount=%d "
+                    "Weapon[0]=%s Weapon[1]=%s Elite[0]=%s\n",
+                    pT->ID, pT->WeaponCount, pT->TurretCount,
+                    pT->Weapon[0].WeaponType ? pT->Weapon[0].WeaponType->ID : "(null)",
+                    pT->Weapon[1].WeaponType ? pT->Weapon[1].WeaponType->ID : "(null)",
+                    pT->EliteWeapon[0].WeaponType
+                        ? pT->EliteWeapon[0].WeaponType->ID : "(null)");
+            }
+        }
+    }
+
     namespace CameoFix
     {
         void Remember(const std::string& targetID, const std::string& originalArt)
@@ -350,27 +386,6 @@ namespace TraitExt
                         "sidebar will show the redirected art's cameo instead\n",
                         cameo.c_str(), kv.first.c_str());
                 }
-            }
-
-            // Read the PARSED weapon back off each target a weapon key was
-            // written to. Writing the section is not evidence the engine used
-            // it - that exact gap is what made a clone's Weapon1 look applied
-            // while every slot was null. Same read-back, on the real type.
-            for (const auto& id : g_WeaponTargets)
-            {
-                TechnoTypeClass* const pT = TechnoTypeClass::Find(id.c_str());
-                if (!pT)
-                {
-                    Debug::Log("[TraitExt] PARSED %s: type not found\n", id.c_str());
-                    continue;
-                }
-                Debug::Log("[TraitExt] PARSED %s: WeaponCount=%d TurretCount=%d "
-                    "Weapon[0]=%s Weapon[1]=%s Elite[0]=%s\n",
-                    pT->ID, pT->WeaponCount, pT->TurretCount,
-                    pT->Weapon[0].WeaponType ? pT->Weapon[0].WeaponType->ID : "(null)",
-                    pT->Weapon[1].WeaponType ? pT->Weapon[1].WeaponType->ID : "(null)",
-                    pT->EliteWeapon[0].WeaponType
-                        ? pT->EliteWeapon[0].WeaponType->ID : "(null)");
             }
 
             // Explicit trait cameos, last so they beat the restore above.
@@ -573,6 +588,7 @@ namespace TraitExt
     {
         unsigned Salt() { return g_Salt; }
         int GateHysteresis() { return g_GateHysteresis; }
+        int GateDwell() { return g_GateDwell; }
 
         const InstancePool* Find(const char* typeID)
         {
@@ -1776,6 +1792,8 @@ namespace TraitExt
         {
             const std::string h = ReadKey(pINI, SectConfig, "GateHysteresis", "5");
             g_GateHysteresis = (std::max)(0, std::atoi(h.c_str()));
+            const std::string d = ReadKey(pINI, SectConfig, "GateDwell", "30");
+            g_GateDwell = (std::max)(0, std::atoi(d.c_str()));
         }
         g_Report = ReadKey(pINI, SectConfig, "Report", "no")[0] == 'y'
             || ReadKey(pINI, SectConfig, "Report", "no")[0] == 'Y';

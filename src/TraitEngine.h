@@ -239,6 +239,14 @@ namespace TraitExt
         void SetEnabled(bool on);
     }
 
+    namespace Diagnostics
+    {
+        // Reads the PARSED weapon arrays back off every target a weapon key was
+        // written to. Separate entry point on purpose: a diagnostic must not sit
+        // behind another feature's early-out.
+        void ReportParsedWeapons();
+    }
+
     namespace CameoFix
     {
         // targetID -> the art section it used before a trait changed Image.
@@ -321,6 +329,8 @@ namespace TraitExt
         unsigned Salt();
         // Deadband in percentage points for threshold gates (see the .cpp).
         int GateHysteresis();
+        // Minimum frames a gate stays open once opened (time deadband).
+        int GateDwell();
 
         // Registered at load; looked up by TechnoType ID at runtime.
         const InstancePool* Find(const char* typeID);

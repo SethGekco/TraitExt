@@ -64,6 +64,12 @@ namespace
     // are currently satisfied for it.
     std::unordered_map<void*, int> g_NextCondCheck;
     std::unordered_map<void*, unsigned> g_CondActive;
+    // Frame each gate OPENED, per (unit, trait index). Threshold gates have a
+    // value deadband; proximity and mission gates have no value to deadband, so
+    // they need a TIME one. Measured: T_Swarm (3 GIs within 5 cells) produced
+    // 6527 opens and 4655 closes in a single session as infantry shuffled -
+    // every one of those re-applied art and wrote a log line.
+    std::map<std::pair<void*, int>, int> g_GateOpenedAt;
 
     // Veterancy a gate overwrote, so closing the gate can put it back.
     // Keyed (unit, trait index) because several gates may touch one unit.
@@ -362,13 +368,33 @@ namespace
             // next to one of these". Either half may be absent, in which case
             // it does not constrain.
             const TraitExt::ConditionalTrait& c = (*pList)[i];
+            const bool wasOpen = (was & (1u << i)) != 0;
+
+            // Minimum dwell: once open, a gate may not close for GateDwell
+            // frames. Without it a unit hovering at the edge of a radius
+            // thrashes, and each flip costs an art re-assign.
+            if (wasOpen)
+            {
+                const auto oit = g_GateOpenedAt.find({ pThis, static_cast<int>(i) });
+                if (oit != g_GateOpenedAt.end()
+                    && now - oit->second < TraitExt::InstanceRandom::GateDwell())
+                {
+                    mask |= (1u << i);
+                    continue;
+                }
+            }
+
             if (OwnerMeets(pThis, c.Requirement)
                 && OwnerLacks(pThis, c.RequireNot)
                 && TraitExt::Conditional::NearMeets(pThis, c)
                 && PowerMeets(pThis, c)
                 && CountryMeets(pThis, c)
-                && SelfMeets(pThis, c, (was & (1u << i)) != 0))
+                && SelfMeets(pThis, c, wasOpen))
+            {
                 mask |= (1u << i);
+                if (!wasOpen)
+                    g_GateOpenedAt[{ pThis, static_cast<int>(i) }] = now;
+            }
         }
 
         if (mask == was)

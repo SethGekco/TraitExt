@@ -242,6 +242,7 @@ InheritExcept=          ; keys/families every InheritFrom skips by default
 InheritFamilyCoherence=yes ; switch off families the donor doesn't use
 ForceWeapon=no          ; default for variants: does their gun beat the asked-for slot
 GateHysteresis=5        ; deadband (percentage points) for threshold gates; 0 = off
+GateDwell=30            ; min frames a gate stays open (time deadband for proximity/mission)
 TargetLists=            ; extra list sections to scan
 
 [TraitTargets]          ; individual sections to treat as targets
