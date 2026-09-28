@@ -226,16 +226,6 @@ namespace
 
         if (!ct.Missions.empty())
         {
-            const int cur = static_cast<int>(pThis->CurrentMission);
-            bool hit = false;
-            for (const int m : ct.Missions)
-                if (m == cur) { hit = true; break; }
-            if (!hit)
-                return false;
-        }
-
-        if (!ct.Missions.empty())
-        {
             // MissionClass::CurrentMission. Mission names were resolved to enum
             // values at load, checked against GeneralDefinitions.h rather than
             // guessed, so an unknown name warns there instead of silently
