@@ -476,8 +476,26 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
     // never run against a clone type.
     RestorePending();
 
-    if (!pThis || !TraitExt::InstanceRandom::Any())
+    if (!pThis)
         return 0;
+
+    // Conditionals are evaluated from this same tick, so the early-out MUST
+    // consider them. It used to test instance pools alone, which meant that
+    // retiring the last random pool silently killed EVERY gate - nine tests
+    // failed at once with all nine correctly registered, because nothing ever
+    // reached the evaluator. Pools and gates are independent features and the
+    // guard has to name both.
+    const bool anyPool = TraitExt::InstanceRandom::Any();
+    const bool anyGate = TraitExt::Conditional::Any();
+    if (!anyPool && !anyGate)
+        return 0;
+
+    // No pools at all: gates are the only work here.
+    if (!anyPool)
+    {
+        EvaluateConditionals(pThis);
+        return 0;
+    }
 
     // Periodic LOOK re-roll, if the pool asked for one. Appearance only: a
     // unit that silently changed armour or veterancy mid-fight would be a

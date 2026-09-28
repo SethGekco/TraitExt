@@ -54,6 +54,9 @@ namespace TraitExt
         std::vector<std::pair<std::string, std::string>> g_CameoRestore;
         struct CameoOverride { std::string Target, Cameo, AltCameo; };
         std::vector<CameoOverride> g_CameoOverrides;
+        // Targets a weapon key was written to, so the parsed result can be
+        // read back once types exist.
+        std::vector<std::string> g_WeaponTargets;
         bool g_CameoFixEnabled = true;
         bool g_CameoApplied = false;
     }
@@ -347,6 +350,27 @@ namespace TraitExt
                         "sidebar will show the redirected art's cameo instead\n",
                         cameo.c_str(), kv.first.c_str());
                 }
+            }
+
+            // Read the PARSED weapon back off each target a weapon key was
+            // written to. Writing the section is not evidence the engine used
+            // it - that exact gap is what made a clone's Weapon1 look applied
+            // while every slot was null. Same read-back, on the real type.
+            for (const auto& id : g_WeaponTargets)
+            {
+                TechnoTypeClass* const pT = TechnoTypeClass::Find(id.c_str());
+                if (!pT)
+                {
+                    Debug::Log("[TraitExt] PARSED %s: type not found\n", id.c_str());
+                    continue;
+                }
+                Debug::Log("[TraitExt] PARSED %s: WeaponCount=%d TurretCount=%d "
+                    "Weapon[0]=%s Weapon[1]=%s Elite[0]=%s\n",
+                    pT->ID, pT->WeaponCount, pT->TurretCount,
+                    pT->Weapon[0].WeaponType ? pT->Weapon[0].WeaponType->ID : "(null)",
+                    pT->Weapon[1].WeaponType ? pT->Weapon[1].WeaponType->ID : "(null)",
+                    pT->EliteWeapon[0].WeaponType
+                        ? pT->EliteWeapon[0].WeaponType->ID : "(null)");
             }
 
             // Explicit trait cameos, last so they beat the restore above.
@@ -2799,6 +2823,10 @@ namespace TraitExt
                 // worked.
                 if (IsWeaponKey(key.c_str()))
                 {
+                    if (std::find(g_WeaponTargets.begin(), g_WeaponTargets.end(), target)
+                        == g_WeaponTargets.end())
+                        g_WeaponTargets.push_back(target);
+
                     const std::string wc = ReadKey(pINI, target.c_str(), "WeaponCount");
                     const std::string gn = ReadKey(pINI, target.c_str(), "Gunner");
 
