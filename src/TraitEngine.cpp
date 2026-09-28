@@ -416,6 +416,10 @@ namespace TraitExt
 
         // Every type ID any proximity gate watches for, and the per-frame
         // snapshot of where those objects currently are.
+        // Every ID that appears in a real type list. A donor NOT in here is a
+        // dummy "package" section, and must be treated as a FRAGMENT rather than
+        // a complete unit - see ExpandInheritFrom.
+        std::unordered_set<std::string> g_RealTypes;
         std::unordered_set<std::string> g_NearWatch;
         std::unordered_map<std::string, std::vector<TechnoClass*>> g_NearIndex;
         int g_NearIndexFrame = -1;
@@ -1510,10 +1514,20 @@ namespace TraitExt
                     // ART: the donor's look is its section name, not a key, so it
                     // is never picked up by the loop above. Synthesise it unless
                     // Art was filtered out or the author set Image themselves.
-                    const bool wantArt = def.InheritOnly.empty()
+                    // A dummy package has NO ART. Synthesising Image= from its
+                    // section name pointed the target at "PkgBase.vxl", which
+                    // does not exist, and the unit rendered as nothing at all.
+                    // Only a real TechnoType can donate a look.
+                    const bool donorIsRealType = g_RealTypes.count(donor) != 0;
+                    const bool wantArt = donorIsRealType && (def.InheritOnly.empty()
                         ? !ListNamesKey(def.InheritExcept, "Image")
                             && !ListNamesKey(g_InheritExceptDefault, "Image")
-                        : ListNamesKey(def.InheritOnly, "Image");
+                        : ListNamesKey(def.InheritOnly, "Image"));
+                    if (!donorIsRealType)
+                        Debug::Log("[TraitExt]   %s: '%s' is not a registered type, so it "
+                            "is treated as a partial PACKAGE - its keys are copied but it "
+                            "donates no look and no \"absent means off\" defaults\n",
+                            def.Name.c_str(), donor.c_str());
                     if (wantArt && !own.count("image"))
                     {
                         const std::string art = ResolveArtName(pINI, donor);
@@ -1560,6 +1574,19 @@ namespace TraitExt
                 };
 
                 const std::string& firstDonor = def.InheritFrom.front();
+
+                // "The donor does not use this family, so switch the target's
+                // off" is sound for a COMPLETE unit and wrong for a fragment: a
+                // package that simply does not mention Turret is not saying the
+                // target has no turret. This stripped a Grizzly's turret because
+                // a two-key package never mentioned one.
+                const bool firstDonorIsRealType = g_RealTypes.count(firstDonor) != 0;
+                if (!firstDonorIsRealType)
+                {
+                    copied.insert(copied.end(), def.Entries.begin(), def.Entries.end());
+                    def.Entries.swap(copied);
+                    continue;
+                }
 
                 // Weapons: a WeaponCount/Gunner target answers from Weapon1..N
                 // and never reads Primary. Inheriting Primary= from a plain tank
@@ -1880,6 +1907,22 @@ namespace TraitExt
         // Resolve InheritFrom before ANY folding: it only rewrites each trait's
         // own Entries, so every downstream path (fold, clone, gate) sees a
         // trait that looks hand-written.
+        // Which IDs are REAL types? Needed before expansion, because that is
+        // where a donor is judged complete-unit vs partial-package. Cheap: four
+        // list sections. Anything not in here donates keys only - no art, and no
+        // "absent means off" coherence.
+        g_RealTypes.clear();
+        for (const char* list : TargetLists)
+        {
+            std::vector<std::string> got;
+            ReadListSection(pINI, list, got);
+            for (const auto& g : got)
+                g_RealTypes.insert(g);
+        }
+        Debug::Log("[TraitExt] %d registered type(s) known; InheritFrom donors "
+            "outside that set are treated as partial packages\n",
+            static_cast<int>(g_RealTypes.size()));
+
         // Expand list targets BEFORE anything reads AppliesTo. One line covering
         // every vehicle beats a hand-maintained roster that silently goes stale
         // as the mod grows.
