@@ -473,6 +473,44 @@ namespace TraitExt
         std::string ArtOwnerOf(CCINIClass* pINI, const std::string& art);
         // Defined further down, used by FurnishClone above it.
         std::string ResolveArtName(CCINIClass* pINI, const std::string& id);
+
+        // Primary= and WeaponN= are MUTUALLY EXCLUSIVE SELECTORS, not two names
+        // for one slot. A type answers from its WeaponN list when that list is
+        // engaged (WeaponCount>0, Gunner=yes, or TurretCount>1) and from
+        // Primary/Secondary otherwise - never both. So writing both does not
+        // make them "agree": it leaves the type contradictory and lets the
+        // selector decide, which is why the same trait worked on one unit and
+        // not another:
+        //   MTNK  Primary only          -> Weapon1 inert  (worked only because
+        //                                   the mirror also wrote Primary)
+        //   FV    Gunner/WeaponCount=17 -> Weapon1 correct
+        //   ROBO  Primary only          -> Weapon1 inert, gun unchanged
+        //   LCRF  no weapon keys at all -> Weapon1 inert
+        // The fix is to write ONE form: whichever the target natively uses.
+        bool UsesWeaponList(CCINIClass* pINI, const std::string& section)
+        {
+            if (std::atoi(ReadKey(pINI, section.c_str(), "WeaponCount").c_str()) > 0)
+                return true;
+            if (std::atoi(ReadKey(pINI, section.c_str(), "TurretCount").c_str()) > 1)
+                return true;
+            const std::string g = ReadKey(pINI, section.c_str(), "Gunner");
+            return !g.empty() && (g[0] == 'y' || g[0] == 'Y' || g[0] == 't'
+                || g[0] == 'T' || g[0] == '1');
+        }
+
+        // Map a weapon key the author wrote onto the form this target reads.
+        // Returns an empty string to mean "write it unchanged".
+        std::string WeaponKeyFor(CCINIClass* pINI, const std::string& section,
+            const char* key)
+        {
+            const bool list = UsesWeaponList(pINI, section);
+
+            if (!_stricmp(key, "Primary"))   return list ? "Weapon1" : "";
+            if (!_stricmp(key, "Secondary")) return list ? "Weapon2" : "";
+            if (!_stricmp(key, "Weapon1"))   return list ? "" : "Primary";
+            if (!_stricmp(key, "Weapon2"))   return list ? "" : "Secondary";
+            return "";
+        }
         std::unordered_set<std::string> g_NearWatch;
         std::unordered_map<std::string, std::vector<TechnoClass*>> g_NearIndex;
         int g_NearIndexFrame = -1;
@@ -1322,32 +1360,44 @@ namespace TraitExt
                 }
             }
 
-            if (!gavePrimary.empty() && !gaveWeaponN)
+            // Translate whichever form the author used into the form the
+            // CLONE reads. Crucially this no longer INTRODUCES WeaponCount on a
+            // Primary-style type: doing that switched the selector and left the
+            // type contradictory, so the inherited Primary kept winning and the
+            // trait's weapon never fired (ROBO, BFRT, LCRF all failed this way).
+            const bool cloneUsesList = UsesWeaponList(pINI, cloneID);
+
+            if (!gavePrimary.empty() && !gaveWeaponN && cloneUsesList)
             {
-                const int tc = std::atoi(ReadKey(pINI, cloneID.c_str(), "TurretCount").c_str());
-                const int wc = std::atoi(ReadKey(pINI, cloneID.c_str(), "WeaponCount").c_str());
-                if (tc > 1 || wc > 0)
+                pINI->WriteString(cloneID.c_str(), "Weapon1", gavePrimary.c_str());
+                VariantWeapon::DeclareSlot(cloneID, 0);
+                if (!gaveSecondary.empty())
                 {
-                    pINI->WriteString(cloneID.c_str(), "Weapon1", gavePrimary.c_str());
-                    VariantWeapon::DeclareSlot(cloneID, 0);
-                    int need = 1;
-                    if (!gaveSecondary.empty())
-                    {
-                        pINI->WriteString(cloneID.c_str(), "Weapon2", gaveSecondary.c_str());
-                        VariantWeapon::DeclareSlot(cloneID, 1);
-                        need = 2;
-                    }
-                    if (wc < need)
-                    {
-                        char buf[8];
-                        std::snprintf(buf, sizeof(buf), "%d", need);
-                        pINI->WriteString(cloneID.c_str(), "WeaponCount", buf);
-                    }
-                    Debug::Log("[TraitExt]   %s: TurretCount=%d/WeaponCount=%d means this "
-                        "type answers from its WeaponN list and IGNORES Primary=, so "
-                        "Primary='%s' was also written as Weapon1\n",
-                        cloneID.c_str(), tc, wc, gavePrimary.c_str());
+                    pINI->WriteString(cloneID.c_str(), "Weapon2", gaveSecondary.c_str());
+                    VariantWeapon::DeclareSlot(cloneID, 1);
                 }
+                Debug::Log("[TraitExt]   %s: reads from its WeaponN list, so Primary='%s' "
+                    "was written as Weapon1\n", cloneID.c_str(), gavePrimary.c_str());
+            }
+            else if (gaveWeaponN && !cloneUsesList)
+            {
+                // The author wrote WeaponN on a type that reads Primary. Move it
+                // rather than bolting on a WeaponCount the type never had.
+                const std::string w1 = ReadKey(pINI, cloneID.c_str(), "Weapon1");
+                const std::string w2 = ReadKey(pINI, cloneID.c_str(), "Weapon2");
+                if (!w1.empty())
+                {
+                    pINI->WriteString(cloneID.c_str(), "Primary", w1.c_str());
+                    VariantWeapon::DeclareSlot(cloneID, 0);
+                }
+                if (!w2.empty())
+                {
+                    pINI->WriteString(cloneID.c_str(), "Secondary", w2.c_str());
+                    VariantWeapon::DeclareSlot(cloneID, 1);
+                }
+                Debug::Log("[TraitExt]   %s: reads from Primary, so Weapon1='%s' "
+                    "was written as Primary (no WeaponCount introduced)\n",
+                    cloneID.c_str(), w1.c_str());
             }
         }
     }
@@ -2917,33 +2967,22 @@ namespace TraitExt
                         == g_WeaponTargets.end())
                         g_WeaponTargets.push_back(target);
 
-                    // MIRROR the two forms instead of betting on which the
-                    // engine prefers. Measured on the real MTNK:
-                    //   written : WeaponCount=1  Weapon1=Comet  (Primary=105mm left alone)
-                    //   PARSED  : WeaponCount=1  Weapon[0]=105mm
-                    // so Primary won - the opposite of what a clone showed,
-                    // where Weapon1 won. I have had this precedence wrong in
-                    // both directions, so the robust move is to make the forms
-                    // AGREE: setting Weapon1 also sets Primary, and vice versa.
-                    // Then the result is the same whichever one is read.
-                    const char* twin = nullptr;
-                    if (!_stricmp(key.c_str(), "Weapon1"))        twin = "Primary";
-                    else if (!_stricmp(key.c_str(), "Weapon2"))   twin = "Secondary";
-                    else if (!_stricmp(key.c_str(), "Primary"))   twin = "Weapon1";
-                    else if (!_stricmp(key.c_str(), "Secondary")) twin = "Weapon2";
-
-                    if (twin)
+                    // Write the form this target actually READS, instead of
+                    // writing both and hoping. See WeaponKeyFor.
+                    const std::string want = WeaponKeyFor(pINI, target, key.c_str());
+                    if (!want.empty())
                     {
-                        bool traitSetTwin = false;
+                        bool traitSetIt = false;
                         for (const auto& ko : keyOrder)
-                            if (!_stricmp(ko.c_str(), twin)) { traitSetTwin = true; break; }
+                            if (!_stricmp(ko.c_str(), want.c_str())) { traitSetIt = true; break; }
 
-                        if (!traitSetTwin)
+                        if (!traitSetIt)
                         {
-                            pINI->WriteString(target.c_str(), twin, result.c_str());
-                            Debug::Log("[TraitExt]   %s.%s mirrored to %s='%s' so both "
-                                "weapon forms agree\n",
-                                target.c_str(), key.c_str(), twin, result.c_str());
+                            pINI->WriteString(target.c_str(), want.c_str(), result.c_str());
+                            Debug::Log("[TraitExt]   %s: '%s' is the wrong form for this "
+                                "type, writing %s='%s' instead (it reads from its %s)\n",
+                                target.c_str(), key.c_str(), want.c_str(), result.c_str(),
+                                UsesWeaponList(pINI, target) ? "WeaponN list" : "Primary");
                         }
                     }
 
