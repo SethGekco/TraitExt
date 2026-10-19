@@ -1093,13 +1093,7 @@ namespace TraitExt
             // the clone load that turret art for itself.
             if (!def.TurretFrom.empty())
             {
-                std::string tart = def.TurretFrom;
-                for (int hops = 0; hops < 8; ++hops)
-                {
-                    const std::string nx = ReadKey(pINI, tart.c_str(), "Image");
-                    if (nx.empty() || nx == tart) break;
-                    tart = nx;
-                }
+                const std::string tart = ResolveArtName(pINI, def.TurretFrom);
                 MixedTurret::Remember(cloneID, tart);
                 Debug::Log("[TraitExt]   %s: turret art from '%s' (resolved '%s')\n",
                     cloneID.c_str(), def.TurretFrom.c_str(), tart.c_str());
@@ -1480,17 +1474,22 @@ namespace TraitExt
         // Resolve the ART SECTION a type actually draws from: its own Image= if
         // it redirects, else its own ID. [SREF] does NOT contain "Image=SREF",
         // so "look like a Prism Tank" has to be synthesised rather than copied.
+        // EXACTLY ONE HOP. Image= on a rules section names an ART section, and
+        // art sections live in artmd.ini - they carry no Image= in rules. So
+        // after one hop you are already in art-name space and must stop.
+        //
+        // Following further silently cross-wires any unit whose ART name
+        // collides with another unit's RULES id, and YR is full of those:
+        //   [APOC] Image=MTNK   (Apocalypse wears art "MTNK")
+        //   [MTNK] Image=GTNK   (MTNK is ALSO the Grizzly's rules id)
+        // so a multi-hop walk took APOC -> MTNK -> GTNK and handed the
+        // Apocalypse the GRIZZLY's art. It also made the art->unit reverse
+        // lookup claim GTNK belonged to APOC, which is why a clone wearing
+        // Image=GTNK could find no turret donor.
         std::string ResolveArtName(CCINIClass* pINI, const std::string& id)
         {
-            std::string art = id;
-            for (int hops = 0; hops < 8; ++hops)
-            {
-                const std::string nx = ReadKey(pINI, art.c_str(), "Image");
-                if (nx.empty() || nx == art)
-                    break;
-                art = nx;
-            }
-            return art;
+            const std::string nx = ReadKey(pINI, id.c_str(), "Image");
+            return (nx.empty() || nx == id) ? id : nx;
         }
 
         std::string ArtOwnerOf(CCINIClass* pINI, const std::string& art)
@@ -2315,13 +2314,8 @@ namespace TraitExt
 
                 if (condWantsArt || condWantsWeapon)
                 {
-                    std::string art = condArt;
-                    for (int hops = 0; hops < 8 && !art.empty(); ++hops)
-                    {
-                        const std::string nx = ReadKey(pINI, art.c_str(), "Image");
-                        if (nx.empty() || nx == art) break;
-                        art = nx;
-                    }
+                    std::string art = condArt.empty()
+                        ? condArt : ResolveArtName(pINI, condArt);
                     if (!condWantsArt)
                         art = ResolveArtName(pINI, want);   // keep its own look
 
@@ -2610,13 +2604,8 @@ namespace TraitExt
                         std::string cloneID;
                         if (wantsArt || wantsWeapon)
                         {
-                            std::string art = artValue;
-                            for (int hops = 0; hops < 8 && !art.empty(); ++hops)
-                            {
-                                const std::string nx = ReadKey(pINI, art.c_str(), "Image");
-                                if (nx.empty() || nx == art) break;
-                                art = nx;
-                            }
+                            std::string art = artValue.empty()
+                                ? artValue : ResolveArtName(pINI, artValue);
 
                             char buf[24];
                             std::snprintf(buf, sizeof(buf), "%.16s$%d", target.c_str(), cloneIdx++);
@@ -2816,13 +2805,7 @@ namespace TraitExt
                 if (def->TurretFrom.empty())
                     continue;
 
-                std::string tart = def->TurretFrom;
-                for (int hops = 0; hops < 8; ++hops)
-                {
-                    const std::string nx = ReadKey(pINI, tart.c_str(), "Image");
-                    if (nx.empty() || nx == tart) break;
-                    tart = nx;
-                }
+                const std::string tart = ResolveArtName(pINI, def->TurretFrom);
                 MixedTurret::Remember(target, tart);
                 Debug::Log("[TraitExt]   %s: turret art from '%s' (resolved '%s')\n",
                     target.c_str(), def->TurretFrom.c_str(), tart.c_str());
@@ -2905,14 +2888,7 @@ namespace TraitExt
                 // the redirect so "look like a Mirage Tank" does what it says.
                 if (!_stricmp(key.c_str(), "Image") && !result.empty())
                 {
-                    std::string art = result;
-                    for (int hops = 0; hops < 8; ++hops)
-                    {
-                        const std::string next = ReadKey(pINI, art.c_str(), "Image");
-                        if (next.empty() || next == art)
-                            break;
-                        art = next;
-                    }
+                    const std::string art = ResolveArtName(pINI, result);
                     if (art != result)
                     {
                         Debug::Log("[TraitExt]   %s.Image '%s' redirects its own art -> using '%s'\n",
