@@ -1362,45 +1362,18 @@ namespace TraitExt
                 }
             }
 
-            // Translate whichever form the author used into the form the
-            // CLONE reads. Crucially this no longer INTRODUCES WeaponCount on a
-            // Primary-style type: doing that switched the selector and left the
-            // type contradictory, so the inherited Primary kept winning and the
-            // trait's weapon never fired (ROBO, BFRT, LCRF all failed this way).
+            // Same rule on a clone: warn rather than rewrite. What this must
+            // NOT do is introduce WeaponCount on a Primary-style type - that
+            // switches the selector and leaves the inherited Primary winning,
+            // which is a bug of ours rather than the author's.
             const bool cloneUsesList = UsesWeaponList(pINI, cloneID);
 
-            if (!gavePrimary.empty() && !gaveWeaponN && cloneUsesList)
-            {
-                pINI->WriteString(cloneID.c_str(), "Weapon1", gavePrimary.c_str());
-                VariantWeapon::DeclareSlot(cloneID, 0);
-                if (!gaveSecondary.empty())
-                {
-                    pINI->WriteString(cloneID.c_str(), "Weapon2", gaveSecondary.c_str());
-                    VariantWeapon::DeclareSlot(cloneID, 1);
-                }
-                Debug::Log("[TraitExt]   %s: reads from its WeaponN list, so Primary='%s' "
-                    "was written as Weapon1\n", cloneID.c_str(), gavePrimary.c_str());
-            }
+            if (!gavePrimary.empty() && cloneUsesList)
+                Debug::Log("[TraitExt]   WARN %s: Primary= has no effect here - this type "
+                    "reads its WeaponN list, so use Weapon1= instead\n", cloneID.c_str());
             else if (gaveWeaponN && !cloneUsesList)
-            {
-                // The author wrote WeaponN on a type that reads Primary. Move it
-                // rather than bolting on a WeaponCount the type never had.
-                const std::string w1 = ReadKey(pINI, cloneID.c_str(), "Weapon1");
-                const std::string w2 = ReadKey(pINI, cloneID.c_str(), "Weapon2");
-                if (!w1.empty())
-                {
-                    pINI->WriteString(cloneID.c_str(), "Primary", w1.c_str());
-                    VariantWeapon::DeclareSlot(cloneID, 0);
-                }
-                if (!w2.empty())
-                {
-                    pINI->WriteString(cloneID.c_str(), "Secondary", w2.c_str());
-                    VariantWeapon::DeclareSlot(cloneID, 1);
-                }
-                Debug::Log("[TraitExt]   %s: reads from Primary, so Weapon1='%s' "
-                    "was written as Primary (no WeaponCount introduced)\n",
-                    cloneID.c_str(), w1.c_str());
-            }
+                Debug::Log("[TraitExt]   WARN %s: WeaponN= has no effect here - this type "
+                    "reads Primary/Secondary, so use Primary= instead\n", cloneID.c_str());
         }
     }
 
@@ -2969,24 +2942,17 @@ namespace TraitExt
                         == g_WeaponTargets.end())
                         g_WeaponTargets.push_back(target);
 
-                    // Write the form this target actually READS, instead of
-                    // writing both and hoping. See WeaponKeyFor.
+                    // Warn, do NOT translate. Writing the wrong form is an
+                    // authoring mistake, and silently rewriting it would hide
+                    // the mistake and make the data stop meaning what it says.
+                    // Just name the key that would have worked.
                     const std::string want = WeaponKeyFor(pINI, target, key.c_str());
                     if (!want.empty())
-                    {
-                        bool traitSetIt = false;
-                        for (const auto& ko : keyOrder)
-                            if (!_stricmp(ko.c_str(), want.c_str())) { traitSetIt = true; break; }
-
-                        if (!traitSetIt)
-                        {
-                            pINI->WriteString(target.c_str(), want.c_str(), result.c_str());
-                            Debug::Log("[TraitExt]   %s: '%s' is the wrong form for this "
-                                "type, writing %s='%s' instead (it reads from its %s)\n",
-                                target.c_str(), key.c_str(), want.c_str(), result.c_str(),
-                                UsesWeaponList(pINI, target) ? "WeaponN list" : "Primary");
-                        }
-                    }
+                        Debug::Log("[TraitExt]   WARN %s: '%s' has no effect on this type - "
+                            "it reads its weapons from %s, so use %s= instead\n",
+                            target.c_str(), key.c_str(),
+                            UsesWeaponList(pINI, target) ? "its WeaponN list" : "Primary/Secondary",
+                            want.c_str());
 
                     const std::string wc = ReadKey(pINI, target.c_str(), "WeaponCount");
                     const std::string gn = ReadKey(pINI, target.c_str(), "Gunner");
