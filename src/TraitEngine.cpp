@@ -459,6 +459,14 @@ namespace TraitExt
         // dummy "package" section, and must be treated as a FRAGMENT rather than
         // a complete unit - see ExpandInheritFrom.
         std::unordered_set<std::string> g_RealTypes;
+        // ART name -> a real unit that wears that art. Needed because a trait
+        // writes Image=<ART SECTION>, and art sections live in artmd.ini: the
+        // Grizzly's art is [GTNK], which does not exist in the RULES ini at
+        // all. Reading turret tags from the art name therefore found nothing
+        // and the clone was written Turret=no - a Grizzly hull with no turret,
+        // on every gated trait using Image=GTNK. Image=SREF only worked
+        // because SREF happens to be both a unit and its own art name.
+        std::unordered_map<std::string, std::string> g_ArtOwner;
         std::unordered_set<std::string> g_NearWatch;
         std::unordered_map<std::string, std::vector<TechnoClass*>> g_NearIndex;
         int g_NearIndexFrame = -1;
@@ -1014,9 +1022,41 @@ namespace TraitExt
                 "WeaponTurretIndex3", "WeaponTurretIndex4",
             };
 
+            // The turret family lives on the UNIT, but artDonor is an ART
+            // section name - and art sections are in artmd.ini. [GTNK] (the
+            // Grizzly's art) is not in the rules INI at all, so every lookup
+            // below came back empty and the clone was stamped Turret=no: a
+            // Grizzly hull with no turret. Map the art back to a unit that
+            // wears it and read the family from there.
+            std::string turretDonor = artDonor;
+            if (!pINI->GetSection(turretDonor.c_str()))
+            {
+                const auto ao = g_ArtOwner.find(artDonor);
+                if (ao != g_ArtOwner.end())
+                {
+                    turretDonor = ao->second;
+                    Debug::Log("[TraitExt]   %s: art '%s' is not a rules section; "
+                        "reading turret tags from '%s', which wears it\n",
+                        cloneID.c_str(), artDonor.c_str(), turretDonor.c_str());
+                }
+                else
+                {
+                    // Unknown art: leave the target's own turret alone rather
+                    // than asserting it has none. Stripping it on a guess is
+                    // what produced the turretless hull.
+                    Debug::Log("[TraitExt]   WARN %s: art '%s' maps to no known unit, "
+                        "so its turret settings are left untouched\n",
+                        cloneID.c_str(), artDonor.c_str());
+                    turretDonor.clear();
+                }
+            }
+
             int copied = 0;
             for (const char* ak : kTurretKeys)
             {
+                if (turretDonor.empty())
+                    break;      // unknown art: touch nothing
+
                 bool traitSpecifies = false;
                 for (const auto& te : def.Entries)
                 {
@@ -1025,7 +1065,7 @@ namespace TraitExt
                 if (traitSpecifies)
                     continue;   // author's own value wins
 
-                const std::string donor = ReadKey(pINI, artDonor.c_str(), ak);
+                const std::string donor = ReadKey(pINI, turretDonor.c_str(), ak);
                 if (!donor.empty())
                 {
                     pINI->WriteString(cloneID.c_str(), ak, donor.c_str());
@@ -1040,8 +1080,9 @@ namespace TraitExt
                     pINI->WriteString(cloneID.c_str(), ak, "no");
                 }
             }
-            Debug::Log("[TraitExt]   %s: inherited %d turret tag(s) from '%s'\n",
-                cloneID.c_str(), copied, artDonor.c_str());
+            if (!turretDonor.empty())
+                Debug::Log("[TraitExt]   %s: inherited %d turret tag(s) from '%s'\n",
+                    cloneID.c_str(), copied, turretDonor.c_str());
 
             // Mixed turrets: resolve the turret donor's ART name
             // the same way the body image is resolved, then have
@@ -1961,9 +2002,17 @@ namespace TraitExt
             for (const auto& g : got)
                 g_RealTypes.insert(g);
         }
-        Debug::Log("[TraitExt] %d registered type(s) known; InheritFrom donors "
-            "outside that set are treated as partial packages\n",
-            static_cast<int>(g_RealTypes.size()));
+        g_ArtOwner.clear();
+        for (const auto& id : g_RealTypes)
+        {
+            const std::string art = ResolveArtName(pINI, id);
+            if (!art.empty())
+                g_ArtOwner.emplace(art, id);   // first owner wins, deterministic enough
+        }
+        Debug::Log("[TraitExt] %d registered type(s) known, %d art name(s) mapped "
+            "back to a unit; InheritFrom donors outside that set are treated as "
+            "partial packages\n",
+            static_cast<int>(g_RealTypes.size()), static_cast<int>(g_ArtOwner.size()));
 
         // Expand list targets BEFORE anything reads AppliesTo. One line covering
         // every vehicle beats a hand-maintained roster that silently goes stale
@@ -2208,30 +2257,43 @@ namespace TraitExt
                 else if (!_stricmp(def.NearOwner.c_str(), "Any"))
                     ct.NearOwner = ConditionalTrait::Whose::Any;
 
-                // If it changes the look, it needs a clone type just like a
-                // random variant does.
+                // A gated trait needs a clone for a different LOOK *or* a
+                // different WEAPON. This used to key on Image alone, so every
+                // weapons-only gate built no clone and silently did nothing -
+                // the same bug already fixed on the random-pool path, left
+                // behind here. It is why four gates reported dead at once.
+                std::string condArt;
+                bool condWantsWeapon = false;
                 for (const auto& e : def.Entries)
                 {
-                    if (_stricmp(e.first.c_str(), "Image") != 0)
-                        continue;
+                    if (!_stricmp(e.first.c_str(), "Image"))
+                        condArt = e.second;
+                    else if (IsWeaponKey(e.first.c_str()))
+                        condWantsWeapon = true;
+                }
 
-                    if (!artCapable(want))
-                    {
-                        Debug::Log("[TraitExt] WARN %s: trait '%s' sets Image, but variant "
-                            "art needs a draw path that reads Type - vehicles and infantry "
-                            "have one, aircraft and buildings do not. %s is neither, so its "
-                            "look cannot change; the trait's other keys still apply.\n",
-                            want.c_str(), def.Name.c_str(), want.c_str());
-                        break;
-                    }
+                bool condWantsArt = !condArt.empty();
+                if (condWantsArt && !artCapable(want))
+                {
+                    Debug::Log("[TraitExt] WARN %s: trait '%s' sets Image, but variant "
+                        "art needs a draw path that reads Type - vehicles and infantry "
+                        "have one, aircraft and buildings do not. %s is neither, so its "
+                        "look cannot change; the trait's other keys still apply.\n",
+                        want.c_str(), def.Name.c_str(), want.c_str());
+                    condWantsArt = false;
+                }
 
-                    std::string art = e.second;
-                    for (int hops = 0; hops < 8; ++hops)
+                if (condWantsArt || condWantsWeapon)
+                {
+                    std::string art = condArt;
+                    for (int hops = 0; hops < 8 && !art.empty(); ++hops)
                     {
                         const std::string nx = ReadKey(pINI, art.c_str(), "Image");
                         if (nx.empty() || nx == art) break;
                         art = nx;
                     }
+                    if (!condWantsArt)
+                        art = ResolveArtName(pINI, want);   // keep its own look
 
                     char buf[24];
                     std::snprintf(buf, sizeof(buf), "%.14s$C%d", want.c_str(), condClones++);
@@ -2244,7 +2306,10 @@ namespace TraitExt
                     // match the borrowed art, plus the trait's own draw and
                     // weapon keys. Without this the unlock changed the image
                     // and nothing else.
-                    FurnishClone(pINI, ct.CloneID, def, e.second, want);
+                    // artDonor is the ART the clone now wears; empty-art
+                    // (weapons-only) keeps its own, so pass the target.
+                    FurnishClone(pINI, ct.CloneID, def,
+                        condWantsArt ? condArt : want, want);
 
                     const auto lit = targetList.find(want);
                     if (lit == targetList.end())
@@ -2266,7 +2331,6 @@ namespace TraitExt
                             want.c_str(), ct.CloneID.c_str(), lit->second.c_str(),
                             idx, ct.CloneID.c_str());
                     }
-                    break;
                 }
 
                 Conditional::Register(want, ct);
@@ -2844,6 +2908,36 @@ namespace TraitExt
                     if (std::find(g_WeaponTargets.begin(), g_WeaponTargets.end(), target)
                         == g_WeaponTargets.end())
                         g_WeaponTargets.push_back(target);
+
+                    // MIRROR the two forms instead of betting on which the
+                    // engine prefers. Measured on the real MTNK:
+                    //   written : WeaponCount=1  Weapon1=Comet  (Primary=105mm left alone)
+                    //   PARSED  : WeaponCount=1  Weapon[0]=105mm
+                    // so Primary won - the opposite of what a clone showed,
+                    // where Weapon1 won. I have had this precedence wrong in
+                    // both directions, so the robust move is to make the forms
+                    // AGREE: setting Weapon1 also sets Primary, and vice versa.
+                    // Then the result is the same whichever one is read.
+                    const char* twin = nullptr;
+                    if (!_stricmp(key.c_str(), "Weapon1"))        twin = "Primary";
+                    else if (!_stricmp(key.c_str(), "Weapon2"))   twin = "Secondary";
+                    else if (!_stricmp(key.c_str(), "Primary"))   twin = "Weapon1";
+                    else if (!_stricmp(key.c_str(), "Secondary")) twin = "Weapon2";
+
+                    if (twin)
+                    {
+                        bool traitSetTwin = false;
+                        for (const auto& ko : keyOrder)
+                            if (!_stricmp(ko.c_str(), twin)) { traitSetTwin = true; break; }
+
+                        if (!traitSetTwin)
+                        {
+                            pINI->WriteString(target.c_str(), twin, result.c_str());
+                            Debug::Log("[TraitExt]   %s.%s mirrored to %s='%s' so both "
+                                "weapon forms agree\n",
+                                target.c_str(), key.c_str(), twin, result.c_str());
+                        }
+                    }
 
                     const std::string wc = ReadKey(pINI, target.c_str(), "WeaponCount");
                     const std::string gn = ReadKey(pINI, target.c_str(), "Gunner");
