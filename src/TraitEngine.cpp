@@ -471,6 +471,8 @@ namespace TraitExt
         // times a handful of clones is nothing, and it sidesteps the ordering
         // problem that made the precomputed map wrong.
         std::string ArtOwnerOf(CCINIClass* pINI, const std::string& art);
+        // Defined further down, used by FurnishClone above it.
+        std::string ResolveArtName(CCINIClass* pINI, const std::string& id);
         std::unordered_set<std::string> g_NearWatch;
         std::unordered_map<std::string, std::vector<TechnoClass*>> g_NearIndex;
         int g_NearIndexFrame = -1;
