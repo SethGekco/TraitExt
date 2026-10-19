@@ -466,7 +466,11 @@ namespace TraitExt
         // and the clone was written Turret=no - a Grizzly hull with no turret,
         // on every gated trait using Image=GTNK. Image=SREF only worked
         // because SREF happens to be both a unit and its own art name.
-        std::unordered_map<std::string, std::string> g_ArtOwner;
+        std::unordered_map<std::string, std::string> g_ArtOwner;   // lazy cache
+        // Which registered unit wears this art? Scanned on demand: 581 types
+        // times a handful of clones is nothing, and it sidesteps the ordering
+        // problem that made the precomputed map wrong.
+        std::string ArtOwnerOf(CCINIClass* pINI, const std::string& art);
         std::unordered_set<std::string> g_NearWatch;
         std::unordered_map<std::string, std::vector<TechnoClass*>> g_NearIndex;
         int g_NearIndexFrame = -1;
@@ -1031,10 +1035,10 @@ namespace TraitExt
             std::string turretDonor = artDonor;
             if (!pINI->GetSection(turretDonor.c_str()))
             {
-                const auto ao = g_ArtOwner.find(artDonor);
-                if (ao != g_ArtOwner.end())
+                const std::string ao = ArtOwnerOf(pINI, artDonor);
+                if (!ao.empty())
                 {
-                    turretDonor = ao->second;
+                    turretDonor = ao;
                     Debug::Log("[TraitExt]   %s: art '%s' is not a rules section; "
                         "reading turret tags from '%s', which wears it\n",
                         cloneID.c_str(), artDonor.c_str(), turretDonor.c_str());
@@ -1487,6 +1491,27 @@ namespace TraitExt
                 art = nx;
             }
             return art;
+        }
+
+        std::string ArtOwnerOf(CCINIClass* pINI, const std::string& art)
+        {
+            if (art.empty())
+                return std::string();
+
+            const auto hit = g_ArtOwner.find(art);
+            if (hit != g_ArtOwner.end())
+                return hit->second;
+
+            for (const auto& id : g_RealTypes)
+            {
+                if (!_stricmp(id.c_str(), art.c_str())
+                    || !_stricmp(ResolveArtName(pINI, id).c_str(), art.c_str()))
+                {
+                    g_ArtOwner.emplace(art, id);
+                    return id;
+                }
+            }
+            return std::string();
         }
 
         // A gate makes a trait RUNTIME-ONLY. This must agree with the
@@ -2002,17 +2027,22 @@ namespace TraitExt
             for (const auto& g : got)
                 g_RealTypes.insert(g);
         }
-        g_ArtOwner.clear();
-        for (const auto& id : g_RealTypes)
-        {
-            const std::string art = ResolveArtName(pINI, id);
-            if (!art.empty())
-                g_ArtOwner.emplace(art, id);   // first owner wins, deterministic enough
-        }
-        Debug::Log("[TraitExt] %d registered type(s) known, %d art name(s) mapped "
-            "back to a unit; InheritFrom donors outside that set are treated as "
-            "partial packages\n",
-            static_cast<int>(g_RealTypes.size()), static_cast<int>(g_ArtOwner.size()));
+        // Art->unit is resolved ON DEMAND (see ArtOwnerOf) rather than
+        // precomputed here. The precomputed version produced one key per type
+        // instead of one per ART - 581 where simulating the identical logic on
+        // the same file offline gives 535 - which means ReadKey(id,"Image")
+        // returned EMPTY at this point in the pass, while the fold later reads
+        // other keys from the same sections without trouble. Resolving at the
+        // point of use removes that timing question entirely.
+        Debug::Log("[TraitExt] %d registered type(s) known; InheritFrom donors "
+            "outside that set are treated as partial packages\n",
+            static_cast<int>(g_RealTypes.size()));
+
+        // One-shot probe for the read above: if this prints empty, Image= is
+        // simply not readable this early and anything art-derived must wait.
+        Debug::Log("[TraitExt] probe: ReadKey(MTNK,Image)='%s'  ResolveArtName(MTNK)='%s'\n",
+            ReadKey(pINI, "MTNK", "Image").c_str(),
+            ResolveArtName(pINI, "MTNK").c_str());
 
         // Expand list targets BEFORE anything reads AppliesTo. One line covering
         // every vehicle beats a hand-maintained roster that silently goes stale
