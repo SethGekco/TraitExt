@@ -474,43 +474,7 @@ namespace TraitExt
         // Defined further down, used by FurnishClone above it.
         std::string ResolveArtName(CCINIClass* pINI, const std::string& id);
 
-        // Primary= and WeaponN= are MUTUALLY EXCLUSIVE SELECTORS, not two names
-        // for one slot. A type answers from its WeaponN list when that list is
-        // engaged (WeaponCount>0, Gunner=yes, or TurretCount>1) and from
-        // Primary/Secondary otherwise - never both. So writing both does not
-        // make them "agree": it leaves the type contradictory and lets the
-        // selector decide, which is why the same trait worked on one unit and
-        // not another:
-        //   MTNK  Primary only          -> Weapon1 inert  (worked only because
-        //                                   the mirror also wrote Primary)
-        //   FV    Gunner/WeaponCount=17 -> Weapon1 correct
-        //   ROBO  Primary only          -> Weapon1 inert, gun unchanged
-        //   LCRF  no weapon keys at all -> Weapon1 inert
-        // The fix is to write ONE form: whichever the target natively uses.
-        bool UsesWeaponList(CCINIClass* pINI, const std::string& section)
-        {
-            if (std::atoi(ReadKey(pINI, section.c_str(), "WeaponCount").c_str()) > 0)
-                return true;
-            if (std::atoi(ReadKey(pINI, section.c_str(), "TurretCount").c_str()) > 1)
-                return true;
-            const std::string g = ReadKey(pINI, section.c_str(), "Gunner");
-            return !g.empty() && (g[0] == 'y' || g[0] == 'Y' || g[0] == 't'
-                || g[0] == 'T' || g[0] == '1');
-        }
 
-        // Map a weapon key the author wrote onto the form this target reads.
-        // Returns an empty string to mean "write it unchanged".
-        std::string WeaponKeyFor(CCINIClass* pINI, const std::string& section,
-            const char* key)
-        {
-            const bool list = UsesWeaponList(pINI, section);
-
-            if (!_stricmp(key, "Primary"))   return list ? "Weapon1" : "";
-            if (!_stricmp(key, "Secondary")) return list ? "Weapon2" : "";
-            if (!_stricmp(key, "Weapon1"))   return list ? "" : "Primary";
-            if (!_stricmp(key, "Weapon2"))   return list ? "" : "Secondary";
-            return "";
-        }
         std::unordered_set<std::string> g_NearWatch;
         std::unordered_map<std::string, std::vector<TechnoClass*>> g_NearIndex;
         int g_NearIndexFrame = -1;
@@ -683,6 +647,44 @@ namespace TraitExt
             // target's inherited value is visible here as its base.
             pINI->ReadString(section, key, def, buffer, sizeof(buffer));
             return Trim(std::string(buffer));
+        }
+
+        // Primary= and WeaponN= are MUTUALLY EXCLUSIVE SELECTORS, not two names
+        // for one slot. A type answers from its WeaponN list when that list is
+        // engaged (WeaponCount>0, Gunner=yes, or TurretCount>1) and from
+        // Primary/Secondary otherwise - never both. So writing both does not
+        // make them "agree": it leaves the type contradictory and lets the
+        // selector decide, which is why the same trait worked on one unit and
+        // not another:
+        //   MTNK  Primary only          -> Weapon1 inert  (worked only because
+        //                                   the mirror also wrote Primary)
+        //   FV    Gunner/WeaponCount=17 -> Weapon1 correct
+        //   ROBO  Primary only          -> Weapon1 inert, gun unchanged
+        //   LCRF  no weapon keys at all -> Weapon1 inert
+        // The fix is to write ONE form: whichever the target natively uses.
+        bool UsesWeaponList(CCINIClass* pINI, const std::string& section)
+        {
+            if (std::atoi(ReadKey(pINI, section.c_str(), "WeaponCount").c_str()) > 0)
+                return true;
+            if (std::atoi(ReadKey(pINI, section.c_str(), "TurretCount").c_str()) > 1)
+                return true;
+            const std::string g = ReadKey(pINI, section.c_str(), "Gunner");
+            return !g.empty() && (g[0] == 'y' || g[0] == 'Y' || g[0] == 't'
+                || g[0] == 'T' || g[0] == '1');
+        }
+
+        // Map a weapon key the author wrote onto the form this target reads.
+        // Returns an empty string to mean "write it unchanged".
+        std::string WeaponKeyFor(CCINIClass* pINI, const std::string& section,
+            const char* key)
+        {
+            const bool list = UsesWeaponList(pINI, section);
+
+            if (!_stricmp(key, "Primary"))   return list ? "Weapon1" : "";
+            if (!_stricmp(key, "Secondary")) return list ? "Weapon2" : "";
+            if (!_stricmp(key, "Weapon1"))   return list ? "" : "Primary";
+            if (!_stricmp(key, "Weapon2"))   return list ? "" : "Secondary";
+            return "";
         }
 
         std::vector<std::string> SplitCSV(const std::string& s)
