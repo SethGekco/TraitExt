@@ -1077,6 +1077,65 @@ namespace TraitExt
         // Shared by the random-pool path and the prerequisite-gated path: it
         // used to live only in the former, which is why a gated Battle
         // Fortress FV changed its image but kept its old turret and weapon.
+        // Make a clone section STAND ALONE rather than lean on $Inherits.
+        //
+        // This cost Rex a broken GI: a gated Speed= trait converted E1 onto a
+        // clone whose section held four literal keys, and the log read
+        // "hp 31/31 -> 1/0" because the clone's Strength was ZERO. $Inherits
+        // is not load-time flattening - it is a Phobos fallback on the INI
+        // READ path (INIClass::GetString's not-found branch, plus companion
+        // typed readers), and those typed hooks are flow-replacing, so
+        // anything else hooking the same readers takes the slot. String reads
+        // inherited, which is why variant ART always worked; the typed int
+        // read for Strength did not. The draw swap never noticed, because for
+        // the width of one DrawIt call nothing asks for Strength. Conversion
+        // made the unit permanently BE the hollow type.
+        //
+        // We write the INI before the engine parses it, so a literal copy is
+        // immune to read-path hook ordering AND to Phobos being absent. Keep
+        // $Inherits as well - it is harmless and covers any key added later.
+        void CopyWholeSection(CCINIClass* pINI, const std::string& from,
+            const std::string& to)
+        {
+            const int n = pINI->GetKeyCount(from.c_str());
+            int copied = 0, skipped = 0;
+            for (int i = 0; i < n; ++i)
+            {
+                const char* const k = pINI->GetKeyName(from.c_str(), i);
+                if (!k || !*k)
+                    continue;
+                if (*k == '$')          // $Inherits and friends
+                    continue;
+
+                // The clone is registered in the same [VehicleTypes] /
+                // [InfantryTypes] list as a real type, so copying the build
+                // keys across would put a duplicate in the sidebar. They are
+                // also exactly the keys that cannot be per-unit anyway.
+                if (VariantType::ClassifyKey(k) == VariantType::Reach::BuildScope)
+                {
+                    ++skipped;
+                    continue;
+                }
+
+                const std::string v = ReadKey(pINI, from.c_str(), k);
+                if (v.empty())
+                    continue;
+                pINI->WriteString(to.c_str(), k, v.c_str());
+                ++copied;
+            }
+
+            // Belt and braces on the sidebar: not buildable, whatever the
+            // parent said. Without this the clone was only kept out of the
+            // sidebar BY THE BUG - TechLevel is an int, and int inheritance
+            // was the half that did not work.
+            pINI->WriteString(to.c_str(), "TechLevel", "-1");
+
+            Debug::Log("[TraitExt]   %s: copied %d key(s) from '%s' literally "
+                "(%d build key(s) skipped) so the clone is a COMPLETE type and "
+                "does not depend on $Inherits being honoured\n",
+                to.c_str(), copied, from.c_str(), skipped);
+        }
+
         void FurnishClone(CCINIClass* pINI, const std::string& cloneID,
             const TraitDef& def, const std::string& artDonor,
             const std::string& target)
@@ -2462,6 +2521,7 @@ namespace TraitExt
                     ct.CloneID = buf;
 
                     pINI->WriteString(ct.CloneID.c_str(), "$Inherits", want.c_str());
+                    CopyWholeSection(pINI, want, ct.CloneID);
                     pINI->WriteString(ct.CloneID.c_str(), "Image", art.c_str());
 
                     VariantType::SetMode(ct.CloneID,
@@ -2497,6 +2557,26 @@ namespace TraitExt
                         Debug::Log("[TraitExt] %s: gated variant '%s' -> [%s] %s=%s\n",
                             want.c_str(), ct.CloneID.c_str(), lit->second.c_str(),
                             idx, ct.CloneID.c_str());
+                    }
+                }
+
+                // READ THE CLONE BACK. Writing a key is not the same as the
+                // clone being usable, and the difference is what broke E1:
+                // the section looked fine in the log line that listed what we
+                // WROTE, while the value the engine would convert onto was
+                // zero. Check the one field whose absence is fatal, at load,
+                // where it is a warning instead of a hollow unit.
+                if (!ct.CloneID.empty())
+                {
+                    const std::string str = ReadKey(pINI, ct.CloneID.c_str(), "Strength");
+                    if (str.empty() || std::atoi(str.c_str()) <= 0)
+                    {
+                        Debug::Log("[TraitExt] WARN %s: clone '%s' has no usable "
+                            "Strength (got '%s'). Conversion onto it will be REFUSED "
+                            "at runtime rather than leave the unit at 0 HP. The "
+                            "literal copy from [%s] did not land.\n",
+                            want.c_str(), ct.CloneID.c_str(),
+                            str.empty() ? "(absent)" : str.c_str(), want.c_str());
                     }
                 }
 
@@ -2782,6 +2862,7 @@ namespace TraitExt
                             cloneID = buf;
 
                             pINI->WriteString(cloneID.c_str(), "$Inherits", target.c_str());
+                            CopyWholeSection(pINI, target, cloneID);
 
                             VariantType::SetMode(cloneID,
                                 ParseGateMode(it->second.GateMode, n.c_str()));

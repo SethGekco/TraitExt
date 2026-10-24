@@ -95,6 +95,28 @@ namespace TraitExt
                 if (!pFrom || !pTo || pFrom == pTo)
                     return false;
 
+                // SANITY-CHECK THE TARGET BEFORE TOUCHING THE UNIT.
+                //
+                // This guard is here because its absence broke a GI. A clone
+                // type that had not been filled in properly carried
+                // Strength=0, the conversion went ahead, and the proportional
+                // HP rescale produced "hp 31/31 -> 1/0" - a unit with no
+                // health that also teleported, because a zeroed Locomotor
+                // CLSID is not a locomotor. Every symptom was downstream of a
+                // target type that was never viable, and nothing checked.
+                //
+                // Refuse instead. A gate that does nothing is a bug report; a
+                // gate that hollows out the unit is a broken game.
+                if (pTo->Strength <= 0)
+                {
+                    Debug::Log("[TraitExt] CONVERT REFUSED %s -> %s: the target type "
+                        "has Strength=%d, so converting would leave the unit with no "
+                        "health. The clone section is incomplete - check for a "
+                        "'copied N key(s) literally' line for %s at load.\n",
+                        pFrom->ID, pTo->ID, pTo->Strength, pTo->ID);
+                    return false;
+                }
+
                 // Cross-category is impossible: the slot is typed, and the
                 // engine's RTTI would disagree with the object's vtable.
                 if (pFrom->WhatAmI() != pTo->WhatAmI())
@@ -164,9 +186,20 @@ namespace TraitExt
                 // released underneath leaves the unit in a stuck state - the
                 // same failure mode the Magnetron page documents when the
                 // jumpjet imbue is torn down out of order.
+                // A zeroed CLSID is not a locomotor, it is an unfilled field.
+                // Replacing a working locomotor with one built from zeros is
+                // how a GI ends up teleporting, so treat it as "no change
+                // wanted" rather than as a request.
+                static const CLSID kNoLoco {};
                 CLSID nowLoco {};
                 ILocomotion* const pILoco = pFoot->Locomotor;
-                if (pILoco
+                if (pTo->Locomotor == kNoLoco)
+                {
+                    Debug::Log("[TraitExt]   %s: target has no Locomotor set, keeping "
+                        "the current one rather than building one from zeros\n",
+                        pTo->ID);
+                }
+                else if (pILoco
                     && SUCCEEDED(static_cast<::LocomotionClass*>(pILoco)->GetClassID(&nowLoco))
                     && nowLoco != pTo->Locomotor)
                 {
