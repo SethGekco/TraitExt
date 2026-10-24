@@ -137,6 +137,26 @@ namespace TraitExt
         bool g_ForceWeaponDefault = false;
     }
 
+    // GateMode=Auto|Draw|Convert. Auto is deliberately the default: the
+    // classification already knows which mechanism can deliver each key, so
+    // the author writes vanilla tags and never has to choose. Draw pins a
+    // trait to the cheap swap (and accepts that type keys will not apply);
+    // Convert forces the full repoint even for an art-only trait.
+    VariantType::Mode ParseGateMode(const std::string& v, const char* who)
+    {
+        if (v.empty())
+            return VariantType::Mode::Auto;
+        if (!_stricmp(v.c_str(), "auto"))
+            return VariantType::Mode::Auto;
+        if (!_stricmp(v.c_str(), "draw"))
+            return VariantType::Mode::Draw;
+        if (!_stricmp(v.c_str(), "convert"))
+            return VariantType::Mode::Convert;
+        Debug::Log("[TraitExt] WARN %s: GateMode='%s' is not one of "
+            "Auto/Draw/Convert; using Auto\n", who, v.c_str());
+        return VariantType::Mode::Auto;
+    }
+
     bool IsWeaponKey(const char* k)
     {
         static const char* const kWeaponKeys[] = {
@@ -1318,11 +1338,41 @@ namespace TraitExt
 
                 if (!drawRelevant)
                 {
-                    Debug::Log("[TraitExt]   WARN %s: '%s' has NO EFFECT here — the "
-                        "variant type is swapped in only for DRAWING and for the "
-                        "weapon lookup, so every other gameplay key still comes "
-                        "from [%s]. Apply it as a plain (non-variant) trait.\n",
-                        cloneID.c_str(), k, target.c_str());
+                    // Not draw-reachable and not a weapon — so the draw-time
+                    // swap cannot deliver it. That used to be the end of the
+                    // story and the key was refused. Now classify it: most of
+                    // them are ordinary type fields, and leaving the Type
+                    // pointer repointed answers them, so write the key onto the
+                    // clone and promote the trait to conversion. The author
+                    // writes a vanilla tag and never learns there are two
+                    // mechanisms.
+                    const auto reach = VariantType::ClassifyKey(k);
+
+                    if (reach == VariantType::Reach::BuildScope)
+                    {
+                        Debug::Log("[TraitExt]   WARN %s: '%s' is a HOUSE question — "
+                            "it is asked while deciding what can be built, before "
+                            "this unit exists, so there is no single unit for it to "
+                            "answer about. Set it on [%s] itself with a load-time "
+                            "trait, where it works fully.\n",
+                            cloneID.c_str(), k, target.c_str());
+                        continue;
+                    }
+
+                    if (reach == VariantType::Reach::ArtFile)
+                    {
+                        Debug::Log("[TraitExt]   WARN %s: '%s' lives in artmd.ini, "
+                            "which TraitExt does not read. Put it in the art section "
+                            "that Image= names. (Cameo/AltCameo are the exceptions "
+                            "and are handled here.)\n", cloneID.c_str(), k);
+                        continue;
+                    }
+
+                    VariantType::MarkTypeKey(cloneID);
+                    pINI->WriteString(cloneID.c_str(), k, te.second.c_str());
+                    Debug::Log("[TraitExt]   %s: '%s' needs the full type, so this "
+                        "trait converts rather than only redrawing\n",
+                        cloneID.c_str(), k);
                     continue;
                 }
 
@@ -1819,7 +1869,7 @@ namespace TraitExt
             "RequirePower", "RequireNot", "RequireHealthBelow",
             "RequireVeterancy", "RequireVeterancyMax", "RequireHealthAbove",
             "AppliesToList", "RequireCountry", "RequireCountryNot",
-            "RequireAmmoBelow", "Weight",
+            "RequireAmmoBelow", "GateMode", "Weight",
             "Cameo", "AltCameo", "RequirePassengers", "RequireMission",
         };
 
@@ -1961,6 +2011,7 @@ namespace TraitExt
             def.NearCount = ReadKey(pINI, name.c_str(), "NearCount");
             def.NearNot = ReadKey(pINI, name.c_str(), "NearNot");
             def.RequireAmmoBelow = ReadKey(pINI, name.c_str(), "RequireAmmoBelow");
+            def.GateMode = ReadKey(pINI, name.c_str(), "GateMode");
             def.BlockedFor = SplitCSV(ReadKey(pINI, name.c_str(), "BlockedFor"));
             def.Cameo = ReadKey(pINI, name.c_str(), "Cameo");
             def.AltCameo = ReadKey(pINI, name.c_str(), "AltCameo");
@@ -2244,6 +2295,21 @@ namespace TraitExt
                 || !_stricmp(lit->second.c_str(), "InfantryTypes");
         };
 
+        // Conversion repoints the instance's own type pointer, which only
+        // FootClass subclasses have. Aircraft DO convert (unlike variant art,
+        // which needs a Type-reading draw path they lack); buildings do not,
+        // because a building's foundation is written into map cells at Unlimbo
+        // and would be left behind by the repoint.
+        auto convertCapable = [&](const std::string& tgt) -> bool
+        {
+            const auto lit = targetList.find(tgt);
+            if (lit == targetList.end())
+                return false;
+            return !_stricmp(lit->second.c_str(), "VehicleTypes")
+                || !_stricmp(lit->second.c_str(), "InfantryTypes")
+                || !_stricmp(lit->second.c_str(), "AircraftTypes");
+        };
+
         // Conditional traits are NOT folded statically — they must be judged
         // per unit against its owner's buildings, or one player's Battle Lab
         // would upgrade everybody's units.
@@ -2335,14 +2401,33 @@ namespace TraitExt
                 // weapons-only gate built no clone and silently did nothing -
                 // the same bug already fixed on the random-pool path, left
                 // behind here. It is why four gates reported dead at once.
+                // ...and now for a different TYPE: any key the draw swap and
+                // GetWeapon cannot reach is delivered by leaving the pointer
+                // repointed, and the clone is what it points AT. Without this
+                // a gate made of Armor= alone built no clone at all.
                 std::string condArt;
                 bool condWantsWeapon = false;
+                bool condWantsType = false;
                 for (const auto& e : def.Entries)
                 {
                     if (!_stricmp(e.first.c_str(), "Image"))
                         condArt = e.second;
                     else if (IsWeaponKey(e.first.c_str()))
                         condWantsWeapon = true;
+                    else if (VariantType::ClassifyKey(e.first.c_str())
+                        == VariantType::Reach::Type)
+                        condWantsType = true;
+                }
+
+                if (condWantsType && !convertCapable(want))
+                {
+                    Debug::Log("[TraitExt] WARN %s: trait '%s' sets keys that need the "
+                        "whole type, which means converting the unit - and only "
+                        "vehicles, infantry and aircraft can be converted. A "
+                        "building's foundation is already written into the map cells. "
+                        "Apply it as a load-time trait instead.\n",
+                        want.c_str(), def.Name.c_str());
+                    condWantsType = false;
                 }
 
                 bool condWantsArt = !condArt.empty();
@@ -2356,7 +2441,7 @@ namespace TraitExt
                     condWantsArt = false;
                 }
 
-                if (condWantsArt || condWantsWeapon)
+                if (condWantsArt || condWantsWeapon || condWantsType)
                 {
                     std::string art = condArt.empty()
                         ? condArt : ResolveArtName(pINI, condArt);
@@ -2369,6 +2454,11 @@ namespace TraitExt
 
                     pINI->WriteString(ct.CloneID.c_str(), "$Inherits", want.c_str());
                     pINI->WriteString(ct.CloneID.c_str(), "Image", art.c_str());
+
+                    VariantType::SetMode(ct.CloneID,
+                        ParseGateMode(def.GateMode, def.Name.c_str()));
+                    if (condWantsType)
+                        VariantType::MarkTypeKey(ct.CloneID);
 
                     // Same furnishing as a random variant: turret tags that
                     // match the borrowed art, plus the trait's own draw and
@@ -2620,14 +2710,24 @@ namespace TraitExt
                         // trait produced no clone and silently did nothing -
                         // the same shape of no-op as writing Primary= onto a
                         // Gunner unit.
+                        // THREE reasons now. The third is a key that only the
+                        // full type can answer - Armor, Speed, Sight, Locomotor
+                        // and the rest of the type surface. Those used to be
+                        // refused outright, so a trait made of nothing but
+                        // Armor= produced no clone and had nothing to convert
+                        // to; the clone is the conversion target.
                         std::string artValue;
                         bool wantsWeapon = false;
+                        bool wantsType = false;
                         for (const auto& e : it->second.Entries)
                         {
                             if (!_stricmp(e.first.c_str(), "Image"))
                                 artValue = e.second;
                             else if (IsWeaponKey(e.first.c_str()))
                                 wantsWeapon = true;
+                            else if (VariantType::ClassifyKey(e.first.c_str())
+                                == VariantType::Reach::Type)
+                                wantsType = true;
                         }
 
                         // Art needs a Type-reading draw path (vehicles, infantry);
@@ -2645,8 +2745,19 @@ namespace TraitExt
                             wantsArt = false;
                         }
 
+                        if (wantsType && !convertCapable(target))
+                        {
+                            Debug::Log("[TraitExt] WARN %s: trait '%s' sets keys that "
+                                "need the whole type, which means converting the unit - "
+                                "and only vehicles, infantry and aircraft can be "
+                                "converted. A building's foundation is already written "
+                                "into the map cells. Apply it as a load-time trait "
+                                "instead.\n", target.c_str(), n.c_str());
+                            wantsType = false;
+                        }
+
                         std::string cloneID;
-                        if (wantsArt || wantsWeapon)
+                        if (wantsArt || wantsWeapon || wantsType)
                         {
                             std::string art = artValue.empty()
                                 ? artValue : ResolveArtName(pINI, artValue);
@@ -2656,6 +2767,11 @@ namespace TraitExt
                             cloneID = buf;
 
                             pINI->WriteString(cloneID.c_str(), "$Inherits", target.c_str());
+
+                            VariantType::SetMode(cloneID,
+                                ParseGateMode(it->second.GateMode, n.c_str()));
+                            if (wantsType)
+                                VariantType::MarkTypeKey(cloneID);
 
                             // ALWAYS write Image, even for a weapons-only
                             // variant. Image= is usually ABSENT from a unit

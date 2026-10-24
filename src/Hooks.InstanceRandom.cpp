@@ -46,6 +46,7 @@
 #include <unordered_map>
 #include <map>
 #include <utility>
+#include <algorithm>
 #include <cmath>
 #include <ScenarioClass.h>
 #include <Fundamentals.h>   // Unsorted::CurrentFrame
@@ -375,9 +376,19 @@ namespace
             // thrashes, and each flip costs an art re-assign.
             if (wasOpen)
             {
+                // A CONVERTING gate gets a floor under the author's dwell
+                // whether they set one or not. A draw swap that flips costs an
+                // art re-assign; a conversion that flips rescales HP
+                // proportionally (lossy, so it DRIFTS on every round trip),
+                // rebuilds the locomotor, and re-registers the unit with its
+                // house. A unit idling on a radius boundary would tear itself
+                // apart at one flip per tick.
+                int dwell = TraitExt::InstanceRandom::GateDwell();
+                if (TraitExt::VariantType::WantsConvert(c.CloneID.c_str()))
+                    dwell = (std::max)(dwell, TraitExt::VariantType::DwellFloor());
+
                 const auto oit = g_GateOpenedAt.find({ pThis, static_cast<int>(i) });
-                if (oit != g_GateOpenedAt.end()
-                    && now - oit->second < TraitExt::InstanceRandom::GateDwell())
+                if (oit != g_GateOpenedAt.end() && now - oit->second < dwell)
                 {
                     mask |= (1u << i);
                     continue;
@@ -445,8 +456,21 @@ namespace
                 ApplyOneTrait(pThis, ct.Def, !ct.CloneID.empty());
                 if (!ct.CloneID.empty())
                 {
-                    TraitExt::VariantArt::Assign(pThis, ct.CloneID.c_str());
-                    TraitExt::VariantWeapon::Assign(pThis, ct.CloneID.c_str());
+                    // CONVERSION SUBSUMES BOTH. Leaving the Type pointer
+                    // repointed means the draw already finds the clone and
+                    // GetWeapon already answers from it, so calling the two
+                    // narrow mechanisms on top would be redundant - and
+                    // VariantArt's own save/restore would fight the persistent
+                    // pointer, putting the original type back mid-frame.
+                    if (TraitExt::VariantType::WantsConvert(ct.CloneID.c_str()))
+                    {
+                        TraitExt::VariantType::Convert(pThis, ct.CloneID.c_str());
+                    }
+                    else
+                    {
+                        TraitExt::VariantArt::Assign(pThis, ct.CloneID.c_str());
+                        TraitExt::VariantWeapon::Assign(pThis, ct.CloneID.c_str());
+                    }
                     tookLook = true;
                 }
             }
@@ -490,6 +514,47 @@ namespace
         {
             TraitExt::VariantArt::Forget(pThis);
             TraitExt::VariantWeapon::Forget(pThis);
+        }
+
+        // Reconcile the PERSISTENT conversion against whatever is still open.
+        // This cannot be folded into the per-gate loop above: with two
+        // converting gates on one unit, closing the second would otherwise
+        // leave it wearing the closed gate's clone, because the loop only ever
+        // sees the gate that changed. Deciding from the whole surviving mask
+        // instead makes the state a function of what is true NOW.
+        //
+        // Lowest index wins when several are open. That is declaration order,
+        // which is identical on every client - it has to be, or two machines
+        // would convert the same unit to different types and desync.
+        const char* wantClone = nullptr;
+        for (size_t i = 0; i < pList->size() && i < 32; ++i)
+        {
+            if ((mask & (1u << i)) == 0)
+                continue;
+            const TraitExt::ConditionalTrait& c = (*pList)[i];
+            if (!c.CloneID.empty()
+                && TraitExt::VariantType::WantsConvert(c.CloneID.c_str()))
+            {
+                wantClone = c.CloneID.c_str();
+                break;
+            }
+        }
+
+        if (wantClone)
+        {
+            // A no-op when the unit already wears it: Repoint refuses when the
+            // from and to types are the same, before touching anything.
+            TraitExt::VariantType::Convert(pThis, wantClone);
+        }
+        else if (TraitExt::VariantType::IsConverted(pThis))
+        {
+            // Put the pointer BACK rather than merely forgetting it. The two
+            // Forget calls above drop a draw-time swap that is re-applied
+            // every tick anyway; a conversion is the unit's actual state until
+            // something undoes it. Restore runs the fix-ups in reverse - HP
+            // rescaled to the original maximum, house tracking moved back,
+            // locomotor rebuilt if it differs.
+            TraitExt::VariantType::Restore(pThis);
         }
     }
 }
@@ -1230,6 +1295,10 @@ DEFINE_HOOK(0x6F4500, TechnoClass_DTOR_InstanceRandom, 0x5)
         g_CondActive.erase(pThis);
         TraitExt::VariantArt::Forget(pThis);
         TraitExt::VariantWeapon::Forget(pThis);
+        // NOT Restore: the object is being destroyed, and moving house
+        // tracking for a dying unit would double-count the loss the engine is
+        // registering right now. Just drop the bookkeeping.
+        TraitExt::VariantType::Forget(pThis);
     }
     return 0;
 }

@@ -50,8 +50,52 @@ below (which are consumed by TraitExt and never written to targets).
 | `Cameo=` / `AltCameo=` | set the sidebar cameo directly (see below) |
 | `RequirePassengers=` | only while at least this many passengers are aboard |
 | `RequireMission=` | only while the unit is doing one of these: `Attack`, `Move`, `Guard`, `AreaGuard`, `Harvest`, `Hunt`, `Patrol`, `Unload`, `Sleep`, … |
+| `GateMode=` | `Auto` (default) / `Draw` / `Convert` — how the gate delivers its keys; see below |
 
 All gates combine — every gate present must hold. Any one alone is fine too.
+
+## `GateMode=` — which mechanism delivers the keys
+
+You should not need this key. It exists for when you want to override a
+decision TraitExt makes for you.
+
+A gate changes **one unit** while the match runs, but a `TechnoTypeClass` is
+shared by every unit of that type in every house. So a gate can only work
+where the engine asks the *instance* instead of the type. There are two
+mechanisms, and `Auto` picks between them by looking at the keys you wrote:
+
+| mode | what it does | reaches |
+|---|---|---|
+| `Draw` | points `Type` at the variant for the width of one draw call, then puts it back | art, turret family, weapons, the four per-instance fields |
+| `Convert` | leaves `Type` repointed — the unit *is* the variant until the gate closes | **every type-level tag**: Armor, Speed, Locomotor, Sight, Passengers, ROT, Landable, Strength as max HP, voices, … plus everything `Draw` reaches |
+| `Auto` | `Draw` if every key lands on the cheap paths, `Convert` if any key needs the full type | — |
+
+Write vanilla tags and let `Auto` sort it out. Set `Draw` to pin a trait to the
+cheap path (type keys then warn and do nothing); set `Convert` to force the
+repoint even for an art-only trait.
+
+**What `Convert` costs**, because it is not free:
+
+* HP is rescaled **proportionally** to the new maximum, so a round trip is
+  lossy and repeated conversion drifts. Converting gates therefore get a
+  minimum `GateDwell` (15 frames) whether you set one or not.
+* The unit is re-registered with its house and the tech tree is rechecked, so
+  a hundred units crossing a threshold in one frame is real work.
+* `Ammo` is clamped if the new maximum is smaller, and cannot be restored.
+* The locomotor is rebuilt if `Locomotor=` differs.
+
+**What `Convert` cannot do:**
+
+* **Buildings.** A building's foundation is written into map cells at Unlimbo,
+  so repointing its type leaves the old footprint occupied. Vehicles, infantry
+  and aircraft only, and only within the same category.
+* **Build-list keys** — `Cost`, `Prerequisite`, `TechLevel`, `Owner`,
+  `ForbiddenHouses`, `RequiredHouses`, `BuildLimit`, `AIBuildThis`. These are
+  asked of the *house* while deciding what can be built, before the unit
+  exists; there is no single unit for them to answer about. Set them with a
+  load-time trait, where they work completely.
+* **artmd.ini keys.** TraitExt reads the rules INI. `Cameo=`/`AltCameo=` are
+  the two deliberate exceptions.
 
 **Faction-specific variants need `RequireCountry=`, not a type edit.** A
 TechnoType is shared by every house, so there is no type-level way to give one

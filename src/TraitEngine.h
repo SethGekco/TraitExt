@@ -111,6 +111,9 @@ namespace TraitExt
         std::string NearCount;
         std::string NearNot;
         std::string RequireAmmoBelow;
+        // Auto (default) / Draw / Convert. Auto lets the key classification
+        // decide, which is the point: vanilla tags, no mechanism to learn.
+        std::string GateMode;
         // Trait-side refusal, the mirror of the target's BlockTraits=. Lets a
         // broadly-applied trait carve out exceptions without editing the units.
         std::vector<std::string> BlockedFor;
@@ -192,6 +195,61 @@ namespace TraitExt
         bool Enabled();
         void SetEnabled(bool on);
         bool Any();
+    }
+
+    // Per-unit PERSISTENT variant. Where VariantArt repoints the Type pointer
+    // for the width of one draw call, this leaves it repointed - so every type
+    // field the engine reads as pThis->Type->Field answers with the variant's
+    // value, which is every type-level TechnoType tag rather than the art and
+    // weapon subset. The cost is the derived state cached at creation (HP scale,
+    // ammo cap, ROT, locomotor, house tracking), which Repoint fixes up.
+    //
+    // Vehicles, infantry and aircraft only, within one category. See
+    // Hooks.TypeConvert.cpp for why buildings are excluded.
+    namespace VariantType
+    {
+        // Which mechanism can deliver a given key to ONE unit.
+        enum class Reach
+        {
+            Instance,   // Health/Veterancy/Ammo - genuinely on the object
+            Weapon,     // answered through TechnoClass::GetWeapon
+            Draw,       // the narrow draw-time swap
+            Type,       // needs the pointer left repointed (conversion)
+            BuildScope, // a HOUSE question, asked before the unit exists
+            ArtFile,    // artmd.ini, which TraitExt never reads
+        };
+
+        // Auto is the default: a trait whose keys all land on the cheap paths
+        // never pays for a conversion, and one that needs more gets it without
+        // the author having to know the difference.
+        enum class Mode { Auto, Draw, Convert };
+
+        Reach ClassifyKey(const char* k);
+        const char* ReachName(Reach r);
+
+        void SetMode(const std::string& cloneID, Mode m);
+        Mode ModeOf(const char* cloneID);
+        void MarkTypeKey(const std::string& cloneID);
+        bool WantsConvert(const char* cloneID);
+
+        // A gate that flickers would convert back and forth, and conversion is
+        // lossy (HP is rescaled proportionally) and expensive (house
+        // re-tracking plus a tech-tree recheck). Convert-mode gates get a
+        // minimum dwell whether the author set one or not.
+        int DwellFloor();
+        void SetDwellFloor(int frames);
+
+        bool Supports(::TechnoClass* pThis);
+        bool Convert(::TechnoClass* pThis, const char* cloneID);
+        bool Restore(::TechnoClass* pThis);
+        bool IsConverted(::TechnoClass* pThis);
+        ::TechnoTypeClass* OriginalType(::TechnoClass* pThis);
+        void Forget(::TechnoClass* pThis);
+        void Clear();
+        bool Enabled();
+        void SetEnabled(bool on);
+        bool Any();
+        void MarkUsed();
     }
 
     // ---- Cameo preservation --------------------------------------------
