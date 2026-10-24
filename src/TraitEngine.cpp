@@ -573,6 +573,11 @@ namespace TraitExt
             if (!pThis)
                 return false;
 
+            // The suspect worth counting: this runs for every gated unit, on
+            // every pass, forever - unlike a conversion, which is bounded by
+            // the dwell.
+            Profile::CountQuery();
+
             RebuildNearIndex();
 
             HouseClass* const pOwner = pThis->Owner;
@@ -1956,6 +1961,10 @@ namespace TraitExt
         }
         g_Report = ReadKey(pINI, SectConfig, "Report", "no")[0] == 'y'
             || ReadKey(pINI, SectConfig, "Report", "no")[0] == 'Y';
+        Profile::SetEnabled(ReadKey(pINI, SectConfig, "Profile", "no")[0] == 'y'
+            || ReadKey(pINI, SectConfig, "Profile", "no")[0] == 'Y');
+        VariantType::SetDwellFloor(
+            std::atoi(ReadKey(pINI, SectConfig, "ConvertDwellFloor", "15").c_str()));
         g_ForceWeaponDefault =
             ReadKey(pINI, SectConfig, "ForceWeapon", "no")[0] == 'y'
             || ReadKey(pINI, SectConfig, "ForceWeapon", "no")[0] == 'Y';
@@ -2490,6 +2499,12 @@ namespace TraitExt
                             idx, ct.CloneID.c_str());
                     }
                 }
+
+                // Resolve the mechanism now rather than per unit per tick.
+                // Must come after FurnishClone, which is where the remaining
+                // type keys get classified and marked.
+                ct.ConvertMode = !ct.CloneID.empty()
+                    && VariantType::WantsConvert(ct.CloneID.c_str());
 
                 Conditional::Register(want, ct);
                 // Requirement may now be empty (a proximity-only gate), so this

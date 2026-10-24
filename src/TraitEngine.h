@@ -206,6 +206,24 @@ namespace TraitExt
     //
     // Vehicles, infantry and aircraft only, within one category. See
     // Hooks.TypeConvert.cpp for why buildings are excluded.
+    // Cost measurement for the per-unit gate machinery. Off unless
+    // [TraitExt] Profile=yes. See Profile.cpp for why this exists rather than
+    // asking whether the game feels slower.
+    namespace Profile
+    {
+        void SetEnabled(bool on);
+        bool Enabled();
+        long long Begin();
+        void End(long long started);
+        void CountQuery();
+        void CountConvert();
+        void CountRestore();
+        void CountOpen();
+        void CountClose();
+        void CountHeld();
+        void Tick();
+    }
+
     namespace VariantType
     {
         // Which mechanism can deliver a given key to ONE unit.
@@ -352,6 +370,11 @@ namespace TraitExt
         std::vector<int> Missions;      // empty = no mission gate
         bool NearInvert = false;
         std::string CloneID;        // empty unless the trait changes appearance
+        // Resolved ONCE at load. The dwell check and the reconciliation both
+        // need it per open gate per unit per evaluation, and asking
+        // VariantType::WantsConvert there meant hashing the clone id as a
+        // string on a path that runs for every living unit.
+        bool ConvertMode = false;
     };
 
     namespace Conditional

@@ -179,6 +179,7 @@ namespace TraitExt
                     }
                 }
 
+                Profile::CountConvert();
                 Debug::Log("[TraitExt] CONVERT %s @%p: %s -> %s (%s) "
                     "hp %d/%d -> %d/%d\n",
                     pFrom->ID, pThis, pFrom->ID, pTo->ID, why,
@@ -243,6 +244,7 @@ namespace TraitExt
                 return false;
 
             ::TechnoTypeClass* const pBack = it->second;
+            Profile::CountRestore();
             const bool ok = Repoint(pThis, pBack, "gate closed");
 
             g_OrigType.erase(it);

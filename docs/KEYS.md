@@ -287,11 +287,37 @@ InheritFamilyCoherence=yes ; switch off families the donor doesn't use
 ForceWeapon=no          ; default for variants: does their gun beat the asked-for slot
 GateHysteresis=5        ; deadband (percentage points) for threshold gates; 0 = off
 GateDwell=30            ; min frames a gate stays open (time deadband for proximity/mission)
+ConvertDwellFloor=15    ; min dwell CONVERTING gates get regardless of GateDwell
+Profile=no              ; yes = log a cost line every 900 frames (see below)
 TargetLists=            ; extra list sections to scan
 
 [TraitTargets]          ; individual sections to treat as targets
 0=SomeWeapon
 ```
+
+### `Profile=yes` — measuring the cost instead of guessing at it
+
+Logs one line a minute:
+
+```
+[TraitExt] PROFILE 900 frames: 1840 evals, 1840 proximity scans, 12 converts,
+  11 restores, 23 opens, 22 closes, 140 holds | 38.4 ms total = 0.06% of the
+  logic budget | 20.9 us per eval
+```
+
+Read it in this order:
+
+* **% of the logic budget** is the only number that decides anything. Under 1%
+  the machinery is noise. Over a few percent, switch something off.
+* **proximity scans** vs **evals** tells you whether the cost is the radius
+  scanning. A scan happens once per gated unit per pass for every trait with
+  `NearTypes=`, forever — unlike a conversion, which the dwell bounds. If these
+  two numbers are close and the cost is high, the proximity gates are the cost.
+* **converts + restores** is conversion churn. If this is large relative to
+  opens/closes, gates are flickering and `ConvertDwellFloor` is too low.
+* **holds** is how many closes the dwell floor suppressed. A big number means
+  the deadband is doing real work — without it, each of those would have been a
+  conversion round trip.
 
 ## Scope: what each can vary
 

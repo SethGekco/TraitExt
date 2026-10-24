@@ -358,6 +358,15 @@ namespace
             return;
         g_NextCondCheck[pThis] = now + 15;   // ~1s
 
+        // Timed from HERE, past the cadence early-out: what matters is the
+        // cost of a pass that actually runs, not of the 14 frames that skip.
+        const long long profStart = TraitExt::Profile::Begin();
+        struct ProfEnd
+        {
+            long long t;
+            ~ProfEnd() { TraitExt::Profile::End(t); }
+        } profEnd { profStart };
+
         // Read BEFORE the loop: the threshold gates need to know whether they
         // are currently open to apply their deadband.
         const unsigned was = g_CondActive.count(pThis) ? g_CondActive[pThis] : 0u;
@@ -384,13 +393,14 @@ namespace
                 // house. A unit idling on a radius boundary would tear itself
                 // apart at one flip per tick.
                 int dwell = TraitExt::InstanceRandom::GateDwell();
-                if (TraitExt::VariantType::WantsConvert(c.CloneID.c_str()))
+                if (c.ConvertMode)
                     dwell = (std::max)(dwell, TraitExt::VariantType::DwellFloor());
 
                 const auto oit = g_GateOpenedAt.find({ pThis, static_cast<int>(i) });
                 if (oit != g_GateOpenedAt.end() && now - oit->second < dwell)
                 {
                     mask |= (1u << i);
+                    TraitExt::Profile::CountHeld();
                     continue;
                 }
             }
@@ -436,6 +446,7 @@ namespace
             const TraitExt::ConditionalTrait& ct = (*pList)[i];
             if (on)
             {
+                TraitExt::Profile::CountOpen();
                 Debug::Log("[TraitExt] (unlock) %s @%p: '%s' satisfied\n",
                     pType->ID, pThis, ct.Def->Name.c_str());
 
@@ -476,6 +487,7 @@ namespace
             }
             else
             {
+                TraitExt::Profile::CountClose();
                 Debug::Log("[TraitExt] (unlock) %s @%p: '%s' no longer satisfied\n",
                     pType->ID, pThis, ct.Def->Name.c_str());
 
@@ -532,8 +544,7 @@ namespace
             if ((mask & (1u << i)) == 0)
                 continue;
             const TraitExt::ConditionalTrait& c = (*pList)[i];
-            if (!c.CloneID.empty()
-                && TraitExt::VariantType::WantsConvert(c.CloneID.c_str()))
+            if (c.ConvertMode)
             {
                 wantClone = c.CloneID.c_str();
                 break;
@@ -566,6 +577,8 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
     // Logic tick is the safety net for the draw-time Type swap: gameplay must
     // never run against a clone type.
     RestorePending();
+
+    TraitExt::Profile::Tick();
 
     if (!pThis)
         return 0;
@@ -1293,6 +1306,16 @@ DEFINE_HOOK(0x6F4500, TechnoClass_DTOR_InstanceRandom, 0x5)
             it = (it->first.first == static_cast<void*>(pThis)) ? g_VetSaved.erase(it) : ++it;
         g_NextCondCheck.erase(pThis);
         g_CondActive.erase(pThis);
+        // This one was LEAKING. Every other per-unit map is erased here, but
+        // g_GateOpenedAt was not, so a match left one std::map node per (dead
+        // unit x gate) alive for its whole duration - and because the dwell
+        // check does a find() on it for every OPEN gate on every living unit,
+        // the tree it walks grew with total unit churn rather than with the
+        // units actually present. That is a progressive slowdown: the same
+        // battle costs more at minute 30 than at minute 3.
+        for (auto it = g_GateOpenedAt.begin(); it != g_GateOpenedAt.end(); )
+            it = (it->first.first == static_cast<void*>(pThis))
+                ? g_GateOpenedAt.erase(it) : ++it;
         TraitExt::VariantArt::Forget(pThis);
         TraitExt::VariantWeapon::Forget(pThis);
         // NOT Restore: the object is being destroyed, and moving house

@@ -27,6 +27,7 @@
     <ClCompile Include="src\TraitEngine.cpp" />
     <ClCompile Include="src\Hooks.InstanceRandom.cpp" />
     <ClCompile Include="src\Hooks.TypeConvert.cpp" />
+    <ClCompile Include="src\Profile.cpp" />
     <ClCompile Include="YRpp\StaticInits.cpp" />
     <!-- Phobos utility implementations -->
     <ClCompile Include="Phobos\src\Utilities\Debug.cpp" />
