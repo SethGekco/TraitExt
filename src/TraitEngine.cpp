@@ -141,10 +141,6 @@ namespace TraitExt
     {
         static const char* const kWeaponKeys[] = {
             "Primary", "Secondary", "ElitePrimary", "EliteSecondary",
-            "Weapon1", "Weapon2", "Weapon3", "Weapon4",
-            "Weapon5", "Weapon6", "Weapon7", "Weapon8",
-            "EliteWeapon1", "EliteWeapon2", "EliteWeapon3", "EliteWeapon4",
-            "EliteWeapon5", "EliteWeapon6", "EliteWeapon7", "EliteWeapon8",
             // The SELECTORS belong to the family too. Without them a variant
             // could carry Weapon1= and still be read through Primary=, or vice
             // versa - and a clone silently dropped WeaponCount entirely, which
@@ -154,7 +150,23 @@ namespace TraitExt
         for (const char* w : kWeaponKeys)
             if (!_stricmp(k, w))
                 return true;
-        return false;
+        // WeaponN / EliteWeaponN across the engine's WHOLE 18-slot array. The
+        // slots used to be spelled out and the list stopped at 8, so a gated
+        // trait that set only Weapon9= did not look like it wanted a weapon,
+        // never got a clone, and did nothing - even though FurnishClone has
+        // always carried all 18 slots across. Gattling types reach past 8.
+        const char* digits = nullptr;
+        if (!_strnicmp(k, "EliteWeapon", 11))
+            digits = k + 11;
+        else if (!_strnicmp(k, "Weapon", 6))
+            digits = k + 6;
+        if (!digits || !*digits)
+            return false;
+        for (const char* d = digits; *d; ++d)
+            if (*d < '0' || *d > '9')
+                return false;
+        const int slot = std::atoi(digits);
+        return slot >= 1 && slot <= 18;
     }
 
     namespace VariantWeapon
@@ -1467,6 +1479,11 @@ namespace TraitExt
             for (int i = 0; i < f.Count; ++i)
                 if (!_stricmp(f.Keys[i], key))
                     return true;
+            // The Weapons family owns the engine's whole 18-slot array; the
+            // list above only spells out the low slots, so Exclude=Weapons
+            // would have let Weapon5..18 through.
+            if (!_stricmp(f.Name, "Weapons") && IsWeaponKey(key))
+                return true;
             return false;
         }
 
