@@ -142,6 +142,43 @@ namespace TraitExt
     // the author writes vanilla tags and never has to choose. Draw pins a
     // trait to the cheap swap (and accepts that type keys will not apply);
     // Convert forces the full repoint even for an art-only trait.
+    // Keys a GATED trait can never deliver, reported where the report is
+    // actually reachable.
+    //
+    // These warnings used to live inside the clone-furnishing loop, which only
+    // runs when a clone exists - and a trait made of nothing but Cost= creates
+    // no clone, so the one diagnostic that would have explained it was behind
+    // the early-out. Rex's T_BadCost test produced a REPORT line and complete
+    // silence otherwise. That is the fourth time a diagnostic of mine has been
+    // unreachable from the case it describes, so it now runs off the trait
+    // definition itself, before any clone decision is taken.
+    void WarnUnreachableKeys(const TraitDef& def, const std::string& target)
+    {
+        for (const auto& e : def.Entries)
+        {
+            const char* const k = e.first.c_str();
+            switch (VariantType::ClassifyKey(k))
+            {
+            case VariantType::Reach::BuildScope:
+                Debug::Log("[TraitExt] WARN trait '%s' on %s: '%s' is a HOUSE "
+                    "question - it is asked while deciding what can be built, "
+                    "before the unit exists, so there is no single unit for it to "
+                    "answer about. Set it on [%s] with a load-time trait, where it "
+                    "works fully.\n",
+                    def.Name.c_str(), target.c_str(), k, target.c_str());
+                break;
+            case VariantType::Reach::ArtFile:
+                Debug::Log("[TraitExt] WARN trait '%s' on %s: '%s' lives in "
+                    "artmd.ini, which TraitExt does not read. Put it in the art "
+                    "section that Image= names. (Cameo/AltCameo are the exceptions "
+                    "and are handled.)\n", def.Name.c_str(), target.c_str(), k);
+                break;
+            default:
+                break;
+            }
+        }
+    }
+
     VariantType::Mode ParseGateMode(const std::string& v, const char* who)
     {
         if (v.empty())
@@ -1412,31 +1449,30 @@ namespace TraitExt
                     // mechanisms.
                     const auto reach = VariantType::ClassifyKey(k);
 
-                    if (reach == VariantType::Reach::BuildScope)
-                    {
-                        Debug::Log("[TraitExt]   WARN %s: '%s' is a HOUSE question — "
-                            "it is asked while deciding what can be built, before "
-                            "this unit exists, so there is no single unit for it to "
-                            "answer about. Set it on [%s] itself with a load-time "
-                            "trait, where it works fully.\n",
-                            cloneID.c_str(), k, target.c_str());
+                    // Reported once at registration by WarnUnreachableKeys,
+                    // which is reachable whether or not a clone exists. Just
+                    // keep them off the clone here.
+                    if (reach == VariantType::Reach::BuildScope
+                        || reach == VariantType::Reach::ArtFile)
                         continue;
-                    }
-
-                    if (reach == VariantType::Reach::ArtFile)
-                    {
-                        Debug::Log("[TraitExt]   WARN %s: '%s' lives in artmd.ini, "
-                            "which TraitExt does not read. Put it in the art section "
-                            "that Image= names. (Cameo/AltCameo are the exceptions "
-                            "and are handled here.)\n", cloneID.c_str(), k);
-                        continue;
-                    }
 
                     VariantType::MarkTypeKey(cloneID);
                     pINI->WriteString(cloneID.c_str(), k, te.second.c_str());
-                    Debug::Log("[TraitExt]   %s: '%s' needs the full type, so this "
-                        "trait converts rather than only redrawing\n",
-                        cloneID.c_str(), k);
+
+                    // ...unless the author pinned this trait to the cheap path,
+                    // in which case saying "this trait converts" is a lie. Rex's
+                    // T_DrawOnly test caught exactly that: GateMode=Draw with
+                    // Speed=2 logged "needs the full type, so this trait
+                    // converts" and then silently did nothing.
+                    if (VariantType::ModeOf(cloneID.c_str()) == VariantType::Mode::Draw)
+                        Debug::Log("[TraitExt]   WARN %s: '%s' needs the full type, "
+                            "but GateMode=Draw pins this trait to the draw swap - so "
+                            "'%s' will NOT apply. Remove GateMode, or set it to "
+                            "Convert.\n", cloneID.c_str(), k, k);
+                    else
+                        Debug::Log("[TraitExt]   %s: '%s' needs the full type, so this "
+                            "trait converts rather than only redrawing\n",
+                            cloneID.c_str(), k);
                     continue;
                 }
 
@@ -2579,6 +2615,8 @@ namespace TraitExt
                             str.empty() ? "(absent)" : str.c_str(), want.c_str());
                     }
                 }
+
+                WarnUnreachableKeys(def, want);
 
                 // Resolve the mechanism now rather than per unit per tick.
                 // Must come after FurnishClone, which is where the remaining
