@@ -344,7 +344,21 @@ namespace
         if (!TraitExt::Conditional::Any() || !pThis)
             return;
 
-        TechnoTypeClass* const pType = pThis->GetTechnoType();
+        // LOOK THE GATES UP BY THE TYPE THE UNIT WAS BUILT AS.
+        //
+        // The trait registry is keyed by type ID, and a CONVERTED unit reports
+        // the clone's ID - so Find() missed, this function returned early, and
+        // the unit fell out of gate evaluation the instant it converted. The
+        // gate could then never close: conversion was a one-way door.
+        //
+        // Rex found it from the outside. A SquadExt escort showed up in its log
+        // as "E1$C8" - our clone type - following a miner eighteen cells from
+        // any barracks, while T_Sluggish had logged 2 opens and 0 closes. The
+        // same bug also made the profiler look idle, because converted units
+        // stopped being counted.
+        TechnoTypeClass* pType = pThis->GetTechnoType();
+        if (auto* const pBuiltAs = TraitExt::VariantType::OriginalType(pThis))
+            pType = pBuiltAs;
         if (!pType)
             return;
 
@@ -607,7 +621,12 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
     // draw hook reads, so an unsynced local RNG is correct here.
     if (g_Seen.count(pThis))
     {
-        TechnoTypeClass* const pT = pThis->GetTechnoType();
+        // Same keyed-by-type-ID trap as the gate lookup: a converted unit
+        // reports the clone's ID, so its pool would not be found and the
+        // periodic re-roll would quietly stop.
+        TechnoTypeClass* pT = pThis->GetTechnoType();
+        if (auto* const pBuiltAs = TraitExt::VariantType::OriginalType(pThis))
+            pT = pBuiltAs;
         const TraitExt::InstancePool* const pP =
             pT ? TraitExt::InstanceRandom::Find(pT->ID) : nullptr;
 
@@ -653,7 +672,9 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
         return 0;
     }
 
-    TechnoTypeClass* const pType = pThis->GetTechnoType();
+    TechnoTypeClass* pType = pThis->GetTechnoType();
+    if (auto* const pBuiltAs = TraitExt::VariantType::OriginalType(pThis))
+        pType = pBuiltAs;      // see EvaluateConditionals for why
     if (!pType)
         return 0;
 
