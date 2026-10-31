@@ -2427,10 +2427,28 @@ namespace TraitExt
             if (!IsGated(def))
                 continue;
 
+            int gatedTargets = 0;
             for (const auto& want : def.AppliesTo)
             {
                 if (!pINI->GetSection(want.c_str()))
+                {
+                    // This used to be a silent `continue`, and the silence has
+                    // now cost three test rounds: a trait aimed at HARV when the
+                    // unit wanted was CMIN, one watching GAPILL when it meant
+                    // GAPILE, and T_BadCost aimed at ROCK - which is the
+                    // Rocketeer's ART name, its rules id being JUMPJET. In every
+                    // case the trait registered nothing, said nothing, and the
+                    // REPORT line still named the target, because REPORT is
+                    // built from the definition rather than from what actually
+                    // registered.
+                    Debug::Log("[TraitExt] WARN trait '%s' AppliesTo '%s', which is "
+                        "NOT a section in this INI - nothing was registered for it. "
+                        "Check for an ART name used where a RULES id belongs (ROCK "
+                        "is art, JUMPJET is the unit; GTNK is art, MTNK is the "
+                        "Grizzly).\n", def.Name.c_str(), want.c_str());
                     continue;
+                }
+                ++gatedTargets;
 
                 ConditionalTrait ct;
                 ct.Def = &def;
@@ -2634,6 +2652,13 @@ namespace TraitExt
                     def.NearTypes.empty() ? "" : def.NearTypes[0].c_str(),
                     ct.CloneID.empty() ? "" : " [has variant art]");
             }
+
+            // The safety net for every "my trait does nothing" report: a gated
+            // trait that matched no target cannot fire, whatever REPORT says.
+            if (gatedTargets == 0)
+                Debug::Log("[TraitExt] WARN trait '%s' is gated but matched NO "
+                    "targets - it can never fire. Every id in its AppliesTo list "
+                    "is missing from this INI.\n", def.Name.c_str());
         }
 
         for (const auto& kv : traits)
