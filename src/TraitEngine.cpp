@@ -1131,8 +1131,24 @@ namespace TraitExt
         // We write the INI before the engine parses it, so a literal copy is
         // immune to read-path hook ordering AND to Phobos being absent. Keep
         // $Inherits as well - it is harmless and covers any key added later.
-        void CopyWholeSection(CCINIClass* pINI, const std::string& from,
-            const std::string& to)
+            bool IsTurretFamilyKey(const char* k)
+        {
+            static const char* const kTurret[] = {
+                "Turret", "TurretCount", "TurretOffset", "UseTurretShadow",
+                "Turret.RangeBands", "Turret.RangeIndices",
+                "TurretNotExportedOnGround", "TurretAnim", "TurretAnimIsVoxel",
+                "TurretAnimX", "TurretAnimY", "TurretAnimZAdjust",
+                "WeaponTurretIndex1", "WeaponTurretIndex2",
+                "WeaponTurretIndex3", "WeaponTurretIndex4",
+            };
+            for (const char* t : kTurret)
+                if (!_stricmp(k, t))
+                    return true;
+            return false;
+        }
+
+    void CopyWholeSection(CCINIClass* pINI, const std::string& from,
+            const std::string& to, bool borrowsArt)
         {
             const int n = pINI->GetKeyCount(from.c_str());
             int copied = 0, skipped = 0;
@@ -1149,6 +1165,20 @@ namespace TraitExt
                 // keys across would put a duplicate in the sidebar. They are
                 // also exactly the keys that cannot be per-unit anyway.
                 if (VariantType::ClassifyKey(k) == VariantType::Reach::BuildScope)
+                {
+                    ++skipped;
+                    continue;
+                }
+
+                // A clone wearing BORROWED art must not inherit the parent's
+                // turret family. FurnishClone exists to make the turret agree
+                // with the art the clone now wears, and this literal copy was
+                // running first and pre-empting it: the Prism Tank's clone kept
+                // TurretCount=4 while wearing a Grizzly voxel that has one
+                // turret, so the draw had nothing coherent to do. That is a
+                // regression this copy introduced - before it, the parent's
+                // turret keys were simply never on the clone.
+                if (borrowsArt && IsTurretFamilyKey(k))
                 {
                     ++skipped;
                     continue;
@@ -2575,7 +2605,7 @@ namespace TraitExt
                     ct.CloneID = buf;
 
                     pINI->WriteString(ct.CloneID.c_str(), "$Inherits", want.c_str());
-                    CopyWholeSection(pINI, want, ct.CloneID);
+                    CopyWholeSection(pINI, want, ct.CloneID, condWantsArt);
                     pINI->WriteString(ct.CloneID.c_str(), "Image", art.c_str());
 
                     VariantType::SetMode(ct.CloneID,
@@ -2633,6 +2663,9 @@ namespace TraitExt
                             str.empty() ? "(absent)" : str.c_str(), want.c_str());
                     }
                 }
+
+                ct.SetsArt = condWantsArt;
+                ct.SetsWeapon = condWantsWeapon;
 
                 WarnUnreachableKeys(def, want);
 
@@ -2925,7 +2958,7 @@ namespace TraitExt
                             cloneID = buf;
 
                             pINI->WriteString(cloneID.c_str(), "$Inherits", target.c_str());
-                            CopyWholeSection(pINI, target, cloneID);
+                            CopyWholeSection(pINI, target, cloneID, wantsArt);
 
                             VariantType::SetMode(cloneID,
                                 ParseGateMode(it->second.GateMode, n.c_str()));

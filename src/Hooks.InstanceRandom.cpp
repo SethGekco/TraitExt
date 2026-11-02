@@ -493,8 +493,18 @@ namespace
                     }
                     else
                     {
-                        TraitExt::VariantArt::Assign(pThis, ct.CloneID.c_str());
-                        TraitExt::VariantWeapon::Assign(pThis, ct.CloneID.c_str());
+                        // ONLY from the trait that actually declared that kind
+                        // of payload. A weapons-only clone carries an explicit
+                        // Image= of its BASE art - required, or an Image-less
+                        // clone loads null art and the first draw divides
+                        // through HVA+8 - but stating it must not make it an
+                        // art authority. Assigning art from it is what
+                        // overwrote T_Loaded's Grizzly look on an IFV that also
+                        // had T_YankeeOnly open.
+                        if (ct.SetsArt)
+                            TraitExt::VariantArt::Assign(pThis, ct.CloneID.c_str());
+                        if (ct.SetsWeapon)
+                            TraitExt::VariantWeapon::Assign(pThis, ct.CloneID.c_str());
                     }
                     tookLook = true;
                 }

@@ -375,6 +375,12 @@ namespace TraitExt
         // VariantType::WantsConvert there meant hashing the clone id as a
         // string on a path that runs for every living unit.
         bool ConvertMode = false;
+        // WHICH KIND of payload this trait actually declared. Needed because a
+        // weapons-only clone still carries an explicit Image= (of its BASE art,
+        // to avoid the null-art crash) - so assigning art from it overwrites an
+        // art-only trait's look on the same unit.
+        bool SetsArt = false;
+        bool SetsWeapon = false;
     };
 
     namespace Conditional
