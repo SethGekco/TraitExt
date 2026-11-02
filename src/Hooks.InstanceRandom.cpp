@@ -1277,9 +1277,56 @@ DEFINE_HOOK(0x70E140, TechnoClass_GetWeapon_Variant, 0x6)
     }
 
     // Mirror vanilla's elite selection, just off the variant's arrays.
-    WeaponStruct* const pWeapon = pThis->Veterancy.IsElite()
-        ? &pVariant->EliteWeapon[use]
-        : &pVariant->Weapon[use];
+    const bool elite = pThis->Veterancy.IsElite();
+    WeaponStruct* pWeapon = elite ? &pVariant->EliteWeapon[use]
+                                  : &pVariant->Weapon[use];
+
+    // RANK fallback. An elite unit whose variant has no elite gun in this slot
+    // keeps the variant's base-rank gun rather than losing the variant
+    // entirely. The clone's INI now mirrors base weapons into the elite slots,
+    // so this is belt-and-braces - but it is the difference between "promoted
+    // units silently revert" and "promoted units keep the gun", and an Academy
+    // makes units elite before they ever fire a shot.
+    if (elite && !pWeapon->WeaponType && pVariant->Weapon[use].WeaponType)
+    {
+        pWeapon = &pVariant->Weapon[use];
+        static std::unordered_set<const void*> s_rank;
+        if (s_rank.insert(pVariant).second)
+            Debug::Log("[TraitExt] GetWeapon: '%s' has no elite gun in slot %d, "
+                "answering its base-rank slot instead\n", pVariant->ID, use);
+    }
+
+    // SLOT fallback. When a slot is empty, vanilla's own callers drop back to
+    // the primary - but if we bail out here that fallback is applied to the REAL
+    // type, so the variant's gun loses to the original. That is exactly how
+    // BFRT kept firing 20mmRapid while wearing the variant's body: the engine
+    // asked for slot 1, the variant declared only slot 0, and vanilla answered
+    // from BFRT itself.
+    //
+    // Only when the real type's slot is EQUALLY empty, though. A populated real
+    // slot means the engine is asking about something the variant merely
+    // inherited - the Gunner passenger case - and that is deliberately vanilla's
+    // to answer, which is what keeps a loaded IFV firing its passenger's gun.
+    if (!pWeapon->WeaponType && use != 0)
+    {
+        TechnoTypeClass* const pReal = pThis->GetTechnoType();
+        const bool realEmpty = !pReal
+            || !(elite ? pReal->EliteWeapon[use].WeaponType
+                       : pReal->Weapon[use].WeaponType);
+        WeaponStruct* const pPrim = (elite && pVariant->EliteWeapon[0].WeaponType)
+            ? &pVariant->EliteWeapon[0]
+            : &pVariant->Weapon[0];
+        if (realEmpty && pPrim->WeaponType)
+        {
+            pWeapon = pPrim;
+            static std::unordered_set<const void*> s_slot;
+            if (s_slot.insert(pVariant).second)
+                Debug::Log("[TraitExt] GetWeapon: '%s' slot %d is empty on the variant "
+                    "AND on the real type, so vanilla would fall back to the primary - "
+                    "answering the VARIANT's primary (%s) instead of the original's\n",
+                    pVariant->ID, use, pPrim->WeaponType->ID);
+        }
+    }
 
     if (!pWeapon->WeaponType)
     {
@@ -1291,7 +1338,7 @@ DEFINE_HOOK(0x70E140, TechnoClass_GetWeapon_Variant, 0x6)
         {
             Debug::Log("[TraitExt] GetWeapon: variant '%s' slot %d is EMPTY "
                 "(asked for %d, elite=%d). WeaponCount=%d TurretCount=%d\n",
-                pVariant->ID, use, index, pThis->Veterancy.IsElite() ? 1 : 0,
+                pVariant->ID, use, index, elite ? 1 : 0,
                 pVariant->WeaponCount, pVariant->TurretCount);
             for (int i = 0; i < 4; ++i)
             {

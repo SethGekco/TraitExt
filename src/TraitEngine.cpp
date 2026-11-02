@@ -736,15 +736,67 @@ namespace TraitExt
         //   ROBO  Primary only          -> Weapon1 inert, gun unchanged
         //   LCRF  no weapon keys at all -> Weapon1 inert
         // The fix is to write ONE form: whichever the target natively uses.
+        bool IsYes(const std::string& v)
+        {
+            return !v.empty() && (v[0] == 'y' || v[0] == 'Y' || v[0] == 't'
+                || v[0] == 'T' || v[0] == '1');
+        }
+
+        // Which SELECTOR does this type answer through - its WeaponN list, or
+        // Primary/Secondary?
+        //
+        // WeaponCount is deliberately NOT part of this test. It only BOUNDS the
+        // list; it does not engage it. That used to be the first clause here and
+        // it was wrong, which is how a trait written Weapon1= could be written
+        // onto a clone untranslated and then never read:
+        //
+        //   SREF$C0  WeaponCount=1 TurretCount=0 Weapon1=105mm -> ALL 18 slots null
+        //   base SREF WeaponCount=1 TurretCount=4 Weapon1=Comet -> Weapon[0]=Comet
+        //   MGTK$C2  WeaponCount=0 TurretCount=0 Primary=Comet  -> Weapon[0]=Comet
+        //   BFRT$C1  WeaponCount=0 TurretCount=0 Primary=105mm  -> Weapon[0]=105mm
+        //
+        // The first two isolate it: same WeaponCount, same key, and only the
+        // turret count differs. The last two kill the converse claim that
+        // WeaponCount=0 suppresses Primary= - it does not.
         bool UsesWeaponList(CCINIClass* pINI, const std::string& section)
         {
-            if (std::atoi(ReadKey(pINI, section.c_str(), "WeaponCount").c_str()) > 0)
-                return true;
             if (std::atoi(ReadKey(pINI, section.c_str(), "TurretCount").c_str()) > 1)
                 return true;
-            const std::string g = ReadKey(pINI, section.c_str(), "Gunner");
-            return !g.empty() && (g[0] == 'y' || g[0] == 'Y' || g[0] == 't'
-                || g[0] == 'T' || g[0] == '1');
+            // Gattling types sit on TurretCount=1 and declare six slots, so
+            // IsGattling is their only way in (vanilla [YTNK]).
+            if (IsYes(ReadKey(pINI, section.c_str(), "IsGattling")))
+                return true;
+            return IsYes(ReadKey(pINI, section.c_str(), "Gunner"));
+        }
+
+        // The elite spelling of a weapon key, or "" when there is none.
+        //
+        // Elite weapons are a PARALLEL array, not a fallback:
+        // TechnoTypeClass::GetWeapon reads EliteWeapon[] whenever
+        // Veterancy.IsElite(), so a trait that writes only Primary= is
+        // invisible to any unit that is already elite - and an Academy makes
+        // units elite the moment they are built. Worse, the clone inherits the
+        // BASE type's elite keys, so the base's own elite gun actively beats the
+        // trait: MGTK$C2 parsed Weapon[0]=Comet (the trait) alongside
+        // EliteWeapon[1]=MirageGunE (the base), and an elite Mirage Tank fired
+        // the base's gun while wearing the variant.
+        std::string EliteFormOf(const char* k)
+        {
+            if (!_strnicmp(k, "Elite", 5))
+                return "";
+            if (!_stricmp(k, "Primary"))   return "ElitePrimary";
+            if (!_stricmp(k, "Secondary")) return "EliteSecondary";
+            if (!_strnicmp(k, "Weapon", 6))
+            {
+                const char* d = k + 6;
+                if (!*d)
+                    return "";
+                for (const char* q = d; *q; ++q)
+                    if (*q < '0' || *q > '9')
+                        return "";
+                return std::string("Elite") + k;
+            }
+            return "";
         }
 
         // Map a weapon key the author wrote onto the form this target reads.
@@ -1338,7 +1390,6 @@ namespace TraitExt
                 }
             } s_dump{ pINI, cloneID };
 
-            std::string gavePrimary, gaveSecondary;
             bool gaveWeaponN = false;
 
             // Does the trait touch weapons at all?
@@ -1387,12 +1438,29 @@ namespace TraitExt
                         "emptying the list\n", cloneID.c_str(), carried, target.c_str());
             }
 
+            // Does the author's own key list end up writing this key, AFTER
+            // translation? Asking about the literal spelling is not enough: on
+            // a Primary/Secondary clone both Weapon1= and EliteWeapon1= are
+            // rewritten, so only the translated form says whether the author
+            // claimed the elite slot or left it to be mirrored.
+            const auto traitWritesKey = [&](const char* key)
+            {
+                for (const auto& e : def.Entries)
+                {
+                    const char* const ek = e.first.c_str();
+                    if (!IsWeaponKey(ek))
+                        continue;
+                    const std::string m = WeaponKeyFor(pINI, cloneID, ek);
+                    if (!_stricmp((m.empty() ? ek : m.c_str()), key))
+                        return true;
+                }
+                return false;
+            };
+
             for (const auto& te : def.Entries)
             {
                 const char* k = te.first.c_str();
-                if (!_stricmp(k, "Primary"))        gavePrimary = te.second;
-                else if (!_stricmp(k, "Secondary")) gaveSecondary = te.second;
-                else if (!_strnicmp(k, "Weapon", 6) && k[6] >= '1' && k[6] <= '9')
+                if (!_strnicmp(k, "Weapon", 6) && k[6] >= '1' && k[6] <= '9')
                     gaveWeaponN = true;
                 if (!_stricmp(k, "Image")
                     || !_stricmp(k, "Health") || !_stricmp(k, "Strength")
@@ -1444,22 +1512,54 @@ namespace TraitExt
                 if (!drawRelevant && IsWeaponKey(k))
                 {
                     VariantWeapon::MarkClone(cloneID);
-                    pINI->WriteString(cloneID.c_str(), k, te.second.c_str());
+
+                    // Write the key in the form THIS clone is read through, not
+                    // the form the author happened to pick. A clone that borrows
+                    // art loses the turret family, and with it the TurretCount>1
+                    // that engaged its base's WeaponN list - so a trait written
+                    // Weapon1= has to land as Primary= here or nothing reads it.
+                    // Both spellings mean the same thing to an author; translate
+                    // rather than make them learn which one this clone needs.
+                    const std::string mapped = WeaponKeyFor(pINI, cloneID, k);
+                    const std::string write = mapped.empty() ? std::string(k) : mapped;
+                    if (!mapped.empty())
+                        Debug::Log("[TraitExt]   %s: '%s' written as '%s', because this "
+                            "type is read through %s\n", cloneID.c_str(), k, write.c_str(),
+                            UsesWeaponList(pINI, cloneID) ? "its WeaponN list"
+                                                          : "Primary/Secondary");
+
+                    pINI->WriteString(cloneID.c_str(), write.c_str(), te.second.c_str());
+
+                    // The same gun into the elite slot, so promotion does not
+                    // silently hand the unit back its original weapon. Skipped
+                    // when the author spelled the elite form out themselves -
+                    // tested on the TRANSLATED key, so Weapon1=/EliteWeapon1=
+                    // cannot race each other through Primary=/ElitePrimary=.
+                    const std::string elite = EliteFormOf(write.c_str());
+                    if (!elite.empty() && !traitWritesKey(elite.c_str()))
+                    {
+                        pINI->WriteString(cloneID.c_str(), elite.c_str(), te.second.c_str());
+                        Debug::Log("[TraitExt]   %s: '%s' mirrored into '%s' so a promoted "
+                            "unit reads the same gun - elite weapons are a parallel array "
+                            "and the clone inherited the base's\n",
+                            cloneID.c_str(), write.c_str(), elite.c_str());
+                    }
 
                     // Which SLOT did the author actually spell out? Only those
                     // are "this variant's own gun"; the rest the clone merely
                     // inherits, and a Gunner unit asking for an inherited slot
                     // is exactly the passenger case ForceWeapon= decides.
+                    const char* const w = write.c_str();
                     int slot = -1;
-                    if (!_stricmp(k, "Primary") || !_stricmp(k, "ElitePrimary"))
+                    if (!_stricmp(w, "Primary") || !_stricmp(w, "ElitePrimary"))
                         slot = 0;
-                    else if (!_stricmp(k, "Secondary") || !_stricmp(k, "EliteSecondary"))
+                    else if (!_stricmp(w, "Secondary") || !_stricmp(w, "EliteSecondary"))
                         slot = 1;
                     else
                     {
                         const char* digits = nullptr;
-                        if (!_strnicmp(k, "EliteWeapon", 11)) digits = k + 11;
-                        else if (!_strnicmp(k, "Weapon", 6))  digits = k + 6;
+                        if (!_strnicmp(w, "EliteWeapon", 11)) digits = w + 11;
+                        else if (!_strnicmp(w, "Weapon", 6))  digits = w + 6;
                         if (digits && *digits >= '1' && *digits <= '9')
                             slot = std::atoi(digits) - 1;
                     }
@@ -1524,10 +1624,32 @@ namespace TraitExt
                     || def.ForceWeapon[0] == 't' || def.ForceWeapon[0] == 'T'
                     || def.ForceWeapon[0] == '1');
 
+            // A clone that is NOT read through its WeaponN list must not carry
+            // a WeaponCount either. Leaving the base's behind would make the
+            // section a shape nothing has ever been measured in: SREF$C0 was
+            // WeaponCount=1 with TurretCount gone and NO Primary at all, so it
+            // proves WeaponCount=1 does not engage the list but says nothing
+            // about whether it suppresses Primary=. Zeroing it makes this clone
+            // structurally identical to BFRT$C1 and MGTK$C2, which are the two
+            // shapes observed firing in game.
+            if (!UsesWeaponList(pINI, cloneID))
+            {
+                const int had = std::atoi(ReadKey(pINI, cloneID.c_str(), "WeaponCount").c_str());
+                if (had > 0)
+                {
+                    pINI->WriteString(cloneID.c_str(), "WeaponCount", "0");
+                    Debug::Log("[TraitExt]   %s: WeaponCount %d -> 0, because this clone is "
+                        "read through Primary/Secondary and a leftover count would leave "
+                        "the section in a shape nothing has measured\n",
+                        cloneID.c_str(), had);
+                }
+            }
             // WeaponN is only read when WeaponCount covers it, so a declared
             // slot with too small a count is silently dropped - which is exactly
-            // how FV$0 ended up with every slot null.
-            if (gaveWeaponN)
+            // how FV$0 ended up with every slot null. Only meaningful on a clone
+            // whose list is actually engaged; on the others the keys were
+            // translated to Primary/Secondary and the count is deliberately 0.
+            if (gaveWeaponN && UsesWeaponList(pINI, cloneID))
             {
                 int highest = 0;
                 for (const auto& te : def.Entries)
@@ -1554,18 +1676,32 @@ namespace TraitExt
                 }
             }
 
-            // Same rule on a clone: warn rather than rewrite. What this must
-            // NOT do is introduce WeaponCount on a Primary-style type - that
-            // switches the selector and leaves the inherited Primary winning,
-            // which is a bug of ours rather than the author's.
-            const bool cloneUsesList = UsesWeaponList(pINI, cloneID);
-
-            if (!gavePrimary.empty() && cloneUsesList)
-                Debug::Log("[TraitExt]   WARN %s: Primary= has no effect here - this type "
-                    "reads its WeaponN list, so use Weapon1= instead\n", cloneID.c_str());
-            else if (gaveWeaponN && !cloneUsesList)
-                Debug::Log("[TraitExt]   WARN %s: WeaponN= has no effect here - this type "
-                    "reads Primary/Secondary, so use Primary= instead\n", cloneID.c_str());
+            // Mismatched spellings used to be WARNed about here and left alone.
+            // They are translated at the point of writing now, so warning about
+            // them would describe a problem that no longer exists - and a
+            // diagnostic that lies is worse than none. What CANNOT be
+            // translated is a slot with no Primary/Secondary spelling: this
+            // clone is read through two slots and Weapon3= upwards has nowhere
+            // to go, so that one is still the author's to fix.
+            if (!UsesWeaponList(pINI, cloneID))
+            {
+                for (const auto& te : def.Entries)
+                {
+                    const char* const k = te.first.c_str();
+                    const char* digits = nullptr;
+                    if (!_strnicmp(k, "EliteWeapon", 11)) digits = k + 11;
+                    else if (!_strnicmp(k, "Weapon", 6))  digits = k + 6;
+                    if (!digits || *digits < '1' || *digits > '9')
+                        continue;
+                    if (std::atoi(digits) <= 2)
+                        continue;   // translated to Primary/Secondary
+                    Debug::Log("[TraitExt]   WARN %s: '%s' cannot apply - this type is read "
+                        "through Primary/Secondary only, which is 2 slots, and nothing asks "
+                        "for slot %d. Use Primary=/Secondary=, or give the type a turret "
+                        "count or Gunner=yes so its WeaponN list is read.\n",
+                        cloneID.c_str(), k, std::atoi(digits));
+                }
+            }
         }
     }
 

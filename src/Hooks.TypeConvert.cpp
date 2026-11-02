@@ -412,6 +412,13 @@ namespace TraitExt
                 "PrerequisiteOverride", "TechLevel", "Owner",
                 "ForbiddenHouses", "RequiredHouses", "BuildLimit",
                 "AIBuildThis", "AIBuildCount", "Unbuildable",
+                // Price is quoted to the HOUSE from the type in the sidebar,
+                // before the unit exists. Converting a built unit repoints a
+                // pointer nothing asks about any more, so a gate on Cost looks
+                // like it works and changes nothing you can see. These were
+                // classified as ordinary type keys and reported as "this trait
+                // converts", which is a promise the mechanism cannot keep.
+                "Cost", "Soylent", "Points",
             };
             for (const char* s : kBuild)
                 if (!_stricmp(k, s))
