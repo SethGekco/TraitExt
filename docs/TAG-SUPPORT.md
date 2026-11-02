@@ -53,13 +53,19 @@ repointing its type leaves the old footprint occupied. Vehicles, infantry and
 aircraft convert, and only within the same category - a `UnitClass` instance
 cannot wear an `InfantryTypeClass`. Phobos refuses this too.
 
-**Build-list keys (8).** Asked of the HOUSE while deciding what can be built,
+**Build-list keys (11).** Asked of the HOUSE while deciding what can be built,
 before the unit exists, so there is no single unit for them to answer about.
 This is a category error rather than a missing feature, and TraitExt now says
 so by name instead of reporting a blanket "no effect":
 
-`AIBuildThis` `BuildLimit` `ForbiddenHouses` `Owner` `Prerequisite`
-`PrerequisiteOverride` `RequiredHouses` `TechLevel`
+`AIBuildThis` `BuildLimit` `Cost` `ForbiddenHouses` `Owner` `Points`
+`Prerequisite` `PrerequisiteOverride` `RequiredHouses` `Soylent` `TechLevel`
+
+`Cost`, `Soylent` and `Points` were in the conversion list until 2026-11-02 and
+should not have been. The price is quoted to the house from the **type** in the
+sidebar, before the unit exists; converting a unit that has already been built
+repoints a pointer nothing asks about any more. The conversion happened, the
+log said "this trait converts", and nothing observable changed.
 
 They work **completely** on a load-time trait, which is where they belong.
 
@@ -73,10 +79,21 @@ change its icon.
   draw path that reads `Type`. Aircraft still *convert*, so an aircraft can
   gain gated speed or `Landable=` - it just cannot change how it looks.
 * **`Primary`/`Secondary` and `WeaponN` are mutually exclusive selectors.** A
-  type reads its `WeaponN` list when that list is engaged (`WeaponCount>0`,
-  `Gunner=yes`, `TurretCount>1`) and `Primary`/`Secondary` otherwise - never
-  both, so one silently overwrites the other. TraitExt warns rather than
-  rewriting: picking the wrong one is an authoring mistake, not ours to guess.
+  type reads its `WeaponN` list when that list is engaged - `TurretCount>1`,
+  `Gunner=yes` or `IsGattling=yes` - and `Primary`/`Secondary` otherwise, never
+  both. `WeaponCount` only **bounds** the list; it does not engage it, and
+  listing it here as if it did was a measured mistake (see
+  `Weapon-Selection.md`). You do not have to pick the right spelling: TraitExt
+  writes your key in whichever form the finished variant is read through. Only
+  `Weapon3` and up are untranslatable on a two-slot type, and those still warn.
+* **Elite weapons are a parallel array, and an Academy makes units elite at
+  build time.** `GetWeapon` reads `EliteWeapon[]` for an elite unit and
+  `Weapon[]` otherwise, with no fallback between them, so on an Academy mod the
+  elite array is the only one ever read. A weapon key you write is therefore
+  mirrored into its elite spelling automatically, unless you spell the elite
+  form out yourself. Without that, a variant inherits the **base** type's elite
+  gun and fires it while wearing your variant's body - which is also why art
+  changing is not evidence the weapon did.
 * **A type with no `Primary` has no targeting at all** (e.g. `LCRF`). A gated
   weapon does not give it the ability to acquire a target.
 * **Rollback is uneven.** `Veterancy` is restored when a gate closes;
@@ -104,7 +121,7 @@ made only of these never pays for a conversion:
 `Weapon13` `Weapon14` `Weapon15` `Weapon16` `Weapon17` `Weapon2` `Weapon3`
 `Weapon4` `Weapon5` `Weapon6` `Weapon7` `Weapon8` `Weapon9` `WeaponCount`
 
-## Reference: keys that need conversion (566 in this ruleset)
+## Reference: keys that need conversion (563 in this ruleset)
 
 Supported on both paths - load-time, and from a gate via conversion:
 
@@ -145,7 +162,7 @@ Supported on both paths - load-time, and from a gate via conversion:
 `Clone.Escalate[0]` `Clone.Escalate[1]` `Clone.Escalate[2]` `Cloning`
 `Cloning.ConsideredBuilt` `Cloning.ConsideredBuilt.Weight` `Cloning.Mult`
 `Cloning.Mult.Blacklist` `Cloning.Mult.Slots` `CloseRange`
-`ConcentricRadialIndicator` `ConsideredAircraft` `ConstructionYard` `Cost`
+`ConcentricRadialIndicator` `ConsideredAircraft` `ConstructionYard`
 `CowTurretIndex` `CowTurretWeapon` `Crashable` `CrashingSound` `CrateBeneath`
 `CrateBeneathIsMoney` `CrateGoodie` `CreateSound` `CreateUnitSound` `Crewed`
 `CrushSound` `Crushable` `Crusher` `DamageParticleSystems` `DamageSelf`
@@ -202,7 +219,7 @@ Supported on both paths - load-time, and from a gate via conversion:
 `Overpowerable` `Parasiteable` `Passengers` `PermaDisguise` `PhysicalSize`
 `Pip` `PipScale` `PipsDrawForAll` `PistolTurretIndex` `PistolTurretWeapon`
 `PitchAngle` `PitchSpeed` `PixelSelectionBracketDelta` `PlaceAnywhere`
-`Points` `Power` `Powered` `PoweredBy` `PoweredSpecial` `PoweredUnit`
+`Power` `Powered` `PoweredBy` `PoweredSpecial` `PoweredUnit`
 `PowersUnit` `Prerequisite.Containers` `Prerequisite.StolenTechs`
 `PreventAttackMove` `ProduceCashAmount` `ProduceCashDelay`
 `ProduceCashStartup` `PsychicDetectionRadius` `ROT` `RadCannonTurretIndex`
@@ -218,7 +235,7 @@ Supported on both paths - load-time, and from a gate via conversion:
 `SelfHealing` `SensorArray` `Sensors` `SensorsSight` `ShockTurretIndex`
 `ShockTurretWeapon` `Sight` `SinkingSound` `Size` `SizeLimit` `SlaveRegenRate`
 `SlaveReloadRate` `Slaved` `SlavesNumber` `SniperTurretIndex`
-`SniperTurretWeapon` `Soylent` `SpawnRegenRate` `SpawnReloadRate` `Spawned`
+`SniperTurretWeapon` `SpawnRegenRate` `SpawnReloadRate` `Spawned`
 `Spawner.AutoDeploy` `Spawner.AutoDeploy.Delay` `Spawner.AutoDeploy.MinReady`
 `Spawns` `SpawnsNumber` `SpecialThreatValue` `Speed` `SpeedType`
 `SpyEffect.GapVision` `SpyEffect.GapVision.Duration`
