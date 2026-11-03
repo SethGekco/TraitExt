@@ -780,6 +780,86 @@ namespace TraitExt
         // trait: MGTK$C2 parsed Weapon[0]=Comet (the trait) alongside
         // EliteWeapon[1]=MirageGunE (the base), and an elite Mirage Tank fired
         // the base's gun while wearing the variant.
+        // base weapon name -> its elite counterpart, as the RULESET declares
+        // the pairing.
+        //
+        // There is no [105mm] EliteVersion= key. The relationship exists only
+        // because types declare both halves in the SAME SLOT - [MTNK] carries
+        // Primary=105mm and ElitePrimary=105mmE - so it has to be collected
+        // from the types themselves. Built by enumerating each section's
+        // literal keys: probing every candidate key on every type would be
+        // tens of thousands of misses, and $Inherits would answer some of them
+        // from a parent, which is not a declaration this type made.
+        //
+        // A base weapon two types disagree about is DROPPED rather than
+        // guessed. Measured on Rex's ruleset: 109 pairings, 3 of them
+        // ambiguous - Comet is claimed by both 120mmE and SuperComet, so a
+        // trait asking for Comet keeps Comet when promoted. Silently picking
+        // one would make the elite gun depend on INI order.
+        const std::unordered_map<std::string, std::string>& ElitePairs(CCINIClass* pINI)
+        {
+            static std::unordered_map<std::string, std::string> s_pairs;
+            static bool s_built = false;
+            if (s_built)
+                return s_pairs;
+            s_built = true;
+
+            std::unordered_set<std::string> ambiguous;
+            for (const std::string& t : g_RealTypes)
+            {
+                const int n = pINI->GetKeyCount(t.c_str());
+                for (int i = 0; i < n; ++i)
+                {
+                    const char* const k = pINI->GetKeyName(t.c_str(), i);
+                    if (!k || _strnicmp(k, "Elite", 5))
+                        continue;
+
+                    std::string base;
+                    if (!_stricmp(k, "ElitePrimary"))
+                        base = "Primary";
+                    else if (!_stricmp(k, "EliteSecondary"))
+                        base = "Secondary";
+                    else if (!_strnicmp(k, "EliteWeapon", 11))
+                    {
+                        const char* d = k + 11;
+                        if (!*d)
+                            continue;
+                        bool digits = true;
+                        for (const char* q = d; *q; ++q)
+                            if (*q < '0' || *q > '9') { digits = false; break; }
+                        if (!digits)
+                            continue;
+                        base = k + 5;       // "EliteWeapon3" -> "Weapon3"
+                    }
+                    else
+                        continue;
+
+                    const std::string b = ReadKey(pINI, t.c_str(), base.c_str());
+                    const std::string e = ReadKey(pINI, t.c_str(), k);
+                    if (b.empty() || e.empty() || !_stricmp(b.c_str(), e.c_str()))
+                        continue;
+                    if (ambiguous.count(b))
+                        continue;
+
+                    const auto it = s_pairs.find(b);
+                    if (it == s_pairs.end())
+                        s_pairs.emplace(b, e);
+                    else if (_stricmp(it->second.c_str(), e.c_str()))
+                    {
+                        Debug::Log("[TraitExt] weapon '%s' has no single elite version - "
+                            "'%s' and '%s' are both claimed, so a trait asking for '%s' "
+                            "will keep it when the unit is promoted\n",
+                            b.c_str(), it->second.c_str(), e.c_str(), b.c_str());
+                        s_pairs.erase(it);
+                        ambiguous.insert(b);
+                    }
+                }
+            }
+            Debug::Log("[TraitExt] %d weapon(s) have an unambiguous elite version\n",
+                static_cast<int>(s_pairs.size()));
+            return s_pairs;
+        }
+
         std::string EliteFormOf(const char* k)
         {
             if (!_strnicmp(k, "Elite", 5))
@@ -1312,11 +1392,51 @@ namespace TraitExt
                 }
             }
 
+            // A turret the engine will never AIM is worse than no turret.
+            //
+            // Observed on the Battle Fortress, which is Turret=no in rules:
+            // wearing the Grizzly's art it DREW the Grizzly's turret and then
+            // never turned it toward what it was shooting. That is the draw
+            // swap's boundary showing through - only the draw reads the clone,
+            // while the aiming code runs against the REAL type, so an object
+            // the engine believes has no turret never drives a turret facing
+            // and the voxel renders at whatever angle it was left at.
+            //
+            // So the donor's turret is adopted only when the unit itself has
+            // one. A hull without a turret is coherent; a turret frozen at
+            // north is a bug the player can see. An author who wants it anyway
+            // says Turret= or TurretFrom= on the trait, and that wins.
+            bool traitStatesTurret = !def.TurretFrom.empty();
+            for (const auto& te : def.Entries)
+                if (!_stricmp(te.first.c_str(), "Turret"))
+                    { traitStatesTurret = true; break; }
+
+            bool suppressTurret = false;
+            if (!turretDonor.empty()
+                && !IsYes(ReadKey(pINI, target.c_str(), "Turret"))
+                && IsYes(ReadKey(pINI, turretDonor.c_str(), "Turret")))
+            {
+                if (traitStatesTurret)
+                    Debug::Log("[TraitExt]   WARN %s: '%s' has no turret of its own, so the "
+                        "engine will not aim the one this trait asks for - it will draw and "
+                        "stay put. Only a trait that CONVERTS gives the type a turret the "
+                        "engine drives.\n", cloneID.c_str(), target.c_str());
+                else
+                {
+                    suppressTurret = true;
+                    pINI->WriteString(cloneID.c_str(), "Turret", "no");
+                    Debug::Log("[TraitExt]   %s: '%s' has no turret, so the turret tags of "
+                        "'%s' are NOT adopted - the engine would draw that turret and never "
+                        "turn it. Add Turret=yes to the trait if you want it anyway.\n",
+                        cloneID.c_str(), target.c_str(), turretDonor.c_str());
+                }
+            }
+
             int copied = 0;
             for (const char* ak : kTurretKeys)
             {
-                if (turretDonor.empty())
-                    break;      // unknown art: touch nothing
+                if (turretDonor.empty() || suppressTurret)
+                    break;      // unknown art, or a turret nothing would aim
 
                 bool traitSpecifies = false;
                 for (const auto& te : def.Entries)
@@ -1341,7 +1461,7 @@ namespace TraitExt
                     pINI->WriteString(cloneID.c_str(), ak, "no");
                 }
             }
-            if (!turretDonor.empty())
+            if (!turretDonor.empty() && !suppressTurret)
                 Debug::Log("[TraitExt]   %s: inherited %d turret tag(s) from '%s'\n",
                     cloneID.c_str(), copied, turretDonor.c_str());
 
@@ -1538,11 +1658,29 @@ namespace TraitExt
                     const std::string elite = EliteFormOf(write.c_str());
                     if (!elite.empty() && !traitWritesKey(elite.c_str()))
                     {
-                        pINI->WriteString(cloneID.c_str(), elite.c_str(), te.second.c_str());
-                        Debug::Log("[TraitExt]   %s: '%s' mirrored into '%s' so a promoted "
-                            "unit reads the same gun - elite weapons are a parallel array "
-                            "and the clone inherited the base's\n",
-                            cloneID.c_str(), write.c_str(), elite.c_str());
+                        // Prefer the ELITE VERSION of the gun the author asked
+                        // for, where the ruleset names one. Borrowing the
+                        // Grizzly's 105mm and then firing plain 105mm while
+                        // elite is not what "this unit now fires the Grizzly's
+                        // gun" means to an author - the Grizzly itself fires
+                        // 105mmE when promoted. Falls back to the same gun when
+                        // the weapon has no elite version or an ambiguous one.
+                        const auto& pairs = ElitePairs(pINI);
+                        const auto it = pairs.find(te.second);
+                        const std::string& val = (it != pairs.end()) ? it->second : te.second;
+
+                        pINI->WriteString(cloneID.c_str(), elite.c_str(), val.c_str());
+                        if (it != pairs.end())
+                            Debug::Log("[TraitExt]   %s: '%s'='%s', so '%s'='%s' - the "
+                                "ruleset names that as its elite version. Write %s= "
+                                "yourself to pin it.\n", cloneID.c_str(), write.c_str(),
+                                te.second.c_str(), elite.c_str(), val.c_str(), elite.c_str());
+                        else
+                            Debug::Log("[TraitExt]   %s: '%s' mirrored into '%s' - no "
+                                "elite version of '%s' is declared, so a promoted unit "
+                                "reads the same gun rather than the base type's\n",
+                                cloneID.c_str(), write.c_str(), elite.c_str(),
+                                te.second.c_str());
                     }
 
                     // Which SLOT did the author actually spell out? Only those
