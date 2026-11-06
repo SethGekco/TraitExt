@@ -1276,6 +1276,26 @@ namespace TraitExt
             for (const char* t : kTurret)
                 if (!_stricmp(k, t))
                     return true;
+
+            // The per-weapon turret MAPPING goes with the turret count it
+            // indexes into. Antares spells it as <Name>TurretIndex= /
+            // <Name>TurretWeapon= over the IFV name list (Normal, Repair,
+            // MachineGun, Flak, Pistol, Sniper, ...), so there is no fixed set
+            // of keys to enumerate - match the suffix.
+            //
+            // Leaving these behind on a clone that borrows art is what made the
+            // engine itself complain: [FV$C4] kept RepairTurretIndex=2 and
+            // FlakTurretIndex=1 from [FV] while TurretCount=4 was skipped, and
+            // the game logged "Weapon 2 on [FV$C4] has an invalid turret index
+            // of 2" for four weapons. An out-of-range index is read during
+            // DRAWING, past ChargerTurrets[], so this is not only noise.
+            const size_t n = std::strlen(k);
+            for (const char* suffix : { "TurretIndex", "TurretWeapon" })
+            {
+                const size_t sl = std::strlen(suffix);
+                if (n > sl && !_stricmp(k + (n - sl), suffix))
+                    return true;
+            }
             return false;
         }
 
