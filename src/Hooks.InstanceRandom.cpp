@@ -1110,6 +1110,16 @@ DEFINE_HOOK(0x73C5F0, UnitClass_DrawAsSHP_VariantArt, 0x6)
     return 0;
 }
 
+// For PerfExt, which runs target checks (and so UnitClass::GetFireError)
+// ahead of time and may run them on several threads: 1 if the ForceBodyFacing
+// hook below can turn this scanner, so its target checks must stay serial (the
+// last one would win). Same condition as the hook, which runs for units only.
+extern "C" __declspec(dllexport) int __cdecl TraitExt_TargetCheckWrites(::TechnoClass* pScanner)
+{
+    return pScanner && pScanner->WhatAmI() == AbstractType::Unit
+        && TraitExt::VariantArt::NeedsBodyFacing(pScanner) ? 1 : 0;
+}
+
 // ForceBodyFacing — make a variant aim with its hull instead of a turret.
 //
 // A variant only LOOKS turretless: gameplay still sees the base type (we swap
