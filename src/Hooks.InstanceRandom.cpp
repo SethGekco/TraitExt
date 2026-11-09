@@ -52,6 +52,7 @@
 #include <Fundamentals.h>   // Unsorted::CurrentFrame
 
 #include <unordered_set>
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <cstdint>
@@ -1195,6 +1196,44 @@ DEFINE_HOOK(0x740FD0, UnitClass_GetFireError_ForceBodyFacing, 0x5)
     return RetFacing;
 }
 
+// GetWeapon's log-once probes. PerfExt may run target checks, and so
+// GetWeapon, on several threads at once, so the probes' flags and sets go
+// through one lock. So does the log itself: Debug::Log formats into a shared
+// buffer. Each probe logs only the first time, so after that it costs a
+// shared lock (sets) or a load (flags).
+namespace
+{
+    SRWLOCK g_GetWeaponLogLock = SRWLOCK_INIT;
+
+    template <typename Log>
+    void LogOnce(std::atomic<bool>& done, Log log)
+    {
+        if (done.load(std::memory_order_acquire))
+            return;
+        AcquireSRWLockExclusive(&g_GetWeaponLogLock);
+        if (!done.load(std::memory_order_relaxed))
+        {
+            done.store(true, std::memory_order_release);
+            log();
+        }
+        ReleaseSRWLockExclusive(&g_GetWeaponLogLock);
+    }
+
+    template <typename Log>
+    void LogOnce(std::unordered_set<const void*>& seen, const void* key, Log log)
+    {
+        AcquireSRWLockShared(&g_GetWeaponLogLock);
+        const bool known = seen.count(key) != 0;
+        ReleaseSRWLockShared(&g_GetWeaponLogLock);
+        if (known)
+            return;
+        AcquireSRWLockExclusive(&g_GetWeaponLogLock);
+        if (seen.insert(key).second)
+            log();
+        ReleaseSRWLockExclusive(&g_GetWeaponLogLock);
+    }
+}
+
 // Per-unit WEAPONS.
 //
 // 0x70E140 = TechnoClass::GetWeapon(int). Crucially this takes the INSTANCE
@@ -1221,12 +1260,10 @@ DEFINE_HOOK(0x70E140, TechnoClass_GetWeapon_Variant, 0x6)
     // address, in which case the whole seam is wrong. Those need different
     // fixes, and only an ungated entry log tells them apart.
     {
-        static bool s_reached = false;
-        if (!s_reached)
-        {
-            s_reached = true;
+        static std::atomic<bool> s_reached { false };
+        LogOnce(s_reached, [] {
             Debug::Log("[TraitExt] GetWeapon hook REACHED (0x70E140 is on a live path)\n");
-        }
+        });
     }
 
     if (!TraitExt::VariantWeapon::Enabled())
@@ -1234,12 +1271,10 @@ DEFINE_HOOK(0x70E140, TechnoClass_GetWeapon_Variant, 0x6)
 
     if (!TraitExt::VariantWeapon::Any())
     {
-        static bool s_empty = false;
-        if (!s_empty)
-        {
-            s_empty = true;
+        static std::atomic<bool> s_empty { false };
+        LogOnce(s_empty, [] {
             Debug::Log("[TraitExt] GetWeapon: no unit has a variant weapon assigned yet\n");
-        }
+        });
         return 0;
     }
 
@@ -1259,9 +1294,10 @@ DEFINE_HOOK(0x70E140, TechnoClass_GetWeapon_Variant, 0x6)
     // answer "did the FV variant engage" at all.
     {
         static std::unordered_set<const void*> s_matched;
-        if (s_matched.insert(pVariant).second)
+        LogOnce(s_matched, pVariant, [&] {
             Debug::Log("[TraitExt] GetWeapon: '%s' matched a variant, slot %d\n",
                 pVariant->ID, index);
+        });
     }
 
     // ForceWeapon: does this variant's own gun beat the slot the engine asked
@@ -1280,9 +1316,10 @@ DEFINE_HOOK(0x70E140, TechnoClass_GetWeapon_Variant, 0x6)
         {
             use = own;
             static std::unordered_set<const void*> s_forced;
-            if (s_forced.insert(pVariant).second)
+            LogOnce(s_forced, pVariant, [&] {
                 Debug::Log("[TraitExt] GetWeapon: '%s' ForceWeapon=yes, answering slot "
                     "%d from its own declared slot %d\n", pVariant->ID, index, own);
+            });
         }
     }
 
@@ -1301,9 +1338,10 @@ DEFINE_HOOK(0x70E140, TechnoClass_GetWeapon_Variant, 0x6)
     {
         pWeapon = &pVariant->Weapon[use];
         static std::unordered_set<const void*> s_rank;
-        if (s_rank.insert(pVariant).second)
+        LogOnce(s_rank, pVariant, [&] {
             Debug::Log("[TraitExt] GetWeapon: '%s' has no elite gun in slot %d, "
                 "answering its base-rank slot instead\n", pVariant->ID, use);
+        });
     }
 
     // SLOT fallback. When a slot is empty, vanilla's own callers drop back to
@@ -1330,11 +1368,12 @@ DEFINE_HOOK(0x70E140, TechnoClass_GetWeapon_Variant, 0x6)
         {
             pWeapon = pPrim;
             static std::unordered_set<const void*> s_slot;
-            if (s_slot.insert(pVariant).second)
+            LogOnce(s_slot, pVariant, [&] {
                 Debug::Log("[TraitExt] GetWeapon: '%s' slot %d is empty on the variant "
                     "AND on the real type, so vanilla would fall back to the primary - "
                     "answering the VARIANT's primary (%s) instead of the original's\n",
                     pVariant->ID, use, pPrim->WeaponType->ID);
+            });
         }
     }
 
@@ -1344,8 +1383,7 @@ DEFINE_HOOK(0x70E140, TechnoClass_GetWeapon_Variant, 0x6)
         // has been dying. Dump what the variant type ACTUALLY parsed, once per
         // type, rather than reasoning about what it should contain.
         static std::unordered_set<const void*> s_dumped;
-        if (s_dumped.insert(pVariant).second)
-        {
+        LogOnce(s_dumped, pVariant, [&] {
             Debug::Log("[TraitExt] GetWeapon: variant '%s' slot %d is EMPTY "
                 "(asked for %d, elite=%d). WeaponCount=%d TurretCount=%d\n",
                 pVariant->ID, use, index, elite ? 1 : 0,
@@ -1368,15 +1406,16 @@ DEFINE_HOOK(0x70E140, TechnoClass_GetWeapon_Variant, 0x6)
                     pBase->Weapon[0].WeaponType
                         ? pBase->Weapon[0].WeaponType->ID : "(null)",
                     pBase->WeaponCount);
-        }
+        });
         return 0;   // variant leaves this slot empty: fall back to vanilla
     }
 
     {
         static std::unordered_set<const void*> s_active;
-        if (s_active.insert(pVariant).second)
+        LogOnce(s_active, pVariant, [&] {
             Debug::Log("[TraitExt] variant weapon ACTIVE: slot %d from '%s' -> %s\n",
                 index, pVariant->ID, pWeapon->WeaponType->ID);
+        });
     }
 
     R->EAX(pWeapon);
