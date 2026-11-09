@@ -856,13 +856,17 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_Update_InstanceRandom, 0x5)
 namespace
 {
     // unit -> the clone type it should be DRAWN as.
-    // g_Variant is read by NeedsBodyFacing, which is what PerfExt's
-    // TraitExt_TargetCheckWrites call evaluates and which the GetFireError hook
-    // also reaches - both on worker threads under lane 3 - while gate
-    // evaluation writes it from TechnoClass::Update on the game thread.
-    // Unlocked on purpose: see the note on g_VariantWeapon in TraitEngine.cpp
-    // for the join-before-serve invariant that makes it safe, and for what
-    // would break it.
+    // g_Variant is read by NeedsBodyFacing, which PerfExt calls through
+    // TraitExt_TargetCheckWrites and which the GetFireError hook also reaches.
+    // Both of those run on the GAME THREAD under lane 3 - the export is called
+    // from WalkStart, not from a worker - so this map has no cross-thread
+    // exposure at all and needs no lock.
+    //
+    // An earlier version of this comment claimed worker-thread reads here. That
+    // was wrong (corrected by the PerfExt session 2026-11-09) and it mattered,
+    // because it would have had the next reader guarding a map that is only
+    // ever touched from one thread. g_VariantWeapon in TraitEngine.cpp is the
+    // genuinely worker-read one; see its note for the invariant there.
     std::unordered_map<void*, UnitTypeClass*> g_Variant;
     std::unordered_map<void*, InfantryTypeClass*> g_VariantInf;
     // clone type -> must aim with the body instead of a turret.

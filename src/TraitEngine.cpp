@@ -132,12 +132,21 @@ namespace TraitExt
         // TechnoClass::Update on the game thread. It still needs no lock, and
         // that is load-bearing enough to write down:
         //
-        // lane 3's worker phase and its serve pass both happen inside ONE
-        // FootClass::GreatestThreat call, and the game thread joins the pool
-        // and waits for every job before serving. No game logic runs in
-        // between - so Update cannot be writing this map while a worker reads
-        // it, and concurrent READS of an unordered_map are safe. (Confirmed by
-        // the PerfExt session 2026-11-09; don't re-derive it.)
+        // lane 3 is FORK-JOIN. Workers run CanAutoTargetObject only inside
+        // Pool::Run; the game thread enters Pool::Run from within one
+        // FootClass::GreatestThreat call, takes its own share of the same jobs,
+        // and leaves only once every job is done (acquire load on a done
+        // counter the workers bump with release). It runs nothing else
+        // meanwhile - no TechnoClass::Update, no gate evaluation - and between
+        // forks the workers only spin on the pool. So Update cannot be writing
+        // this map while a worker reads it, and concurrent READS of an
+        // unordered_map are safe. (From the PerfExt session 2026-11-09; don't
+        // re-derive it.)
+        //
+        // Reachability of the read is from the static call tree in
+        // PerfExt/docs/lane3-audit-gamemd.md - row 0x70e140, pass 1 - NOT from
+        // an observed call. The "GetWeapon hook REACHED" line in a Verify game
+        // does not show phase 1 reached it, because GetWeapon has many callers.
         //
         // An SRW lock was added here on 2026-11-09 and reverted the same day:
         // it guarded a race the architecture already precludes, and cost every
