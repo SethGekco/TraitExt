@@ -96,6 +96,13 @@ change its icon.
   changing is not evidence the weapon did.
 * **A type with no `Primary` has no targeting at all** (e.g. `LCRF`). A gated
   weapon does not give it the ability to acquire a target.
+* **A gate opens up to about a second after its condition becomes true.**
+  Conditions are re-evaluated at most once every 15 frames per unit, which is
+  roughly 1s of game logic. Load a passenger or cut power and the change is
+  visibly a beat behind. This is deliberate: the check runs per unit per gate,
+  so evaluating it every frame costs CPU on every unit that carries one. If a
+  trait needs to look instant, that trade is the thing to revisit - not the
+  gate itself.
 * **Rollback is uneven.** `Veterancy` is restored when a gate closes;
   `Health`/`Strength` and `Ammo` are not, because gameplay moves them in
   between and restoring would undo real damage.

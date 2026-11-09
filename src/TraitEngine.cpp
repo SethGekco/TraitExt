@@ -1277,25 +1277,25 @@ namespace TraitExt
                 if (!_stricmp(k, t))
                     return true;
 
-            // The per-weapon turret MAPPING goes with the turret count it
-            // indexes into. Antares spells it as <Name>TurretIndex= /
-            // <Name>TurretWeapon= over the IFV name list (Normal, Repair,
-            // MachineGun, Flak, Pistol, Sniper, ...), so there is no fixed set
-            // of keys to enumerate - match the suffix.
+            // The per-weapon turret MAPPING (<Name>TurretIndex= /
+            // <Name>TurretWeapon= over Antares' IFV name list) is deliberately
+            // NOT skipped here, and that is a measured decision rather than an
+            // oversight.
             //
-            // Leaving these behind on a clone that borrows art is what made the
-            // engine itself complain: [FV$C4] kept RepairTurretIndex=2 and
-            // FlakTurretIndex=1 from [FV] while TurretCount=4 was skipped, and
-            // the game logged "Weapon 2 on [FV$C4] has an invalid turret index
-            // of 2" for four weapons. An out-of-range index is read during
-            // DRAWING, past ChargerTurrets[], so this is not only noise.
-            const size_t n = std::strlen(k);
-            for (const char* suffix : { "TurretIndex", "TurretWeapon" })
-            {
-                const size_t sl = std::strlen(suffix);
-                if (n > sl && !_stricmp(k + (n - sl), suffix))
-                    return true;
-            }
+            // Skipping it was tried and was strictly worse. The engine already
+            // complained that [FV$C4] carried RepairTurretIndex=2 while
+            // TurretCount=4 had been dropped for the borrowed art - four
+            // "invalid turret index" warnings. Removing the mapping took that
+            // to SEVENTEEN, one per weapon, with the index now reported as -1:
+            // a Gunner type needs a turret index for every weapon it declares,
+            // so an absent mapping is less valid than a stale one, not more.
+            //
+            // The real fix is a turret COUNT the mapping can index into, which
+            // means deciding whether a clone wearing single-turret art should
+            // keep the base's count - and that trades against the draw
+            // incoherence dropping it was introduced to fix. Unresolved, and
+            // left as the smaller of two known-wrong states until there is a
+            // test for it. See Ext-Turrets.md.
             return false;
         }
 
