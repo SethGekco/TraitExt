@@ -414,10 +414,10 @@ namespace
         // list that scans keeps the old interval. Lists that run every frame
         // skip the throttle map entirely, so they do not pay a lookup and a
         // write per unit per frame for a bound that is always already met.
+        const int now = Unsorted::CurrentFrame;   // also used by the dwell checks below
         const int cadence = CadenceFor(pList);
         if (cadence > 1)
         {
-            const int now = Unsorted::CurrentFrame;
             const auto nit = g_NextCondCheck.find(pThis);
             if (nit != g_NextCondCheck.end() && now < nit->second)
                 return;
