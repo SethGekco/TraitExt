@@ -65,6 +65,37 @@ namespace
     // unit -> frame of its next prerequisite re-check, and which gated traits
     // are currently satisfied for it.
     std::unordered_map<void*, int> g_NextCondCheck;
+
+    // Frames between evaluations of a given trait list: 1 when nothing in it
+    // scans, and the original 15 when something does. Memoised per list,
+    // because the answer is fixed once traits are registered - and keyed on the
+    // list POINTER, which is stable: g_Conditional is an unordered_map, so a
+    // rehash moves buckets but never the mapped values.
+    int CadenceFor(const std::vector<TraitExt::ConditionalTrait>* pList)
+    {
+        static std::unordered_map<const void*, int> s_cadence;
+        const auto it = s_cadence.find(pList);
+        if (it != s_cadence.end())
+            return it->second;
+
+        int cadence = 1;
+        for (const auto& c : *pList)
+        {
+            // The only gate that costs anything: NearMeets walks an index
+            // rebuilt per cadence, so letting it run every frame would rebuild
+            // that index every frame.
+            if (!c.NearTypes.empty() && c.NearRange > 0)
+            {
+                cadence = 15;
+                break;
+            }
+        }
+        s_cadence.emplace(pList, cadence);
+        Debug::Log("[TraitExt] trait list %p evaluated every %d frame(s)%s\n",
+            static_cast<const void*>(pList), cadence,
+            cadence > 1 ? " (it has a proximity gate to amortise)" : "");
+        return cadence;
+    }
     std::unordered_map<void*, unsigned> g_CondActive;
     // Frame each gate OPENED, per (unit, trait index). Threshold gates have a
     // value deadband; proximity and mission gates have no value to deadband, so
@@ -367,11 +398,31 @@ namespace
         if (!pList)
             return;
 
-        const int now = Unsorted::CurrentFrame;
-        const auto nit = g_NextCondCheck.find(pThis);
-        if (nit != g_NextCondCheck.end() && now < nit->second)
-            return;
-        g_NextCondCheck[pThis] = now + 15;   // ~1s
+        // The 15-frame cadence exists for exactly ONE gate: the proximity scan,
+        // which walks objects. Every other condition on a ConditionalTrait is a
+        // field read or a house counter - MinPassengers is
+        // Passengers.NumPassengers, NeedPower is a house flag, Requirement is
+        // CountOwnedAndPresent - and throttling those bought nothing while
+        // costing up to a second of visible lag.
+        //
+        // Rex reported it from the outside: board a passenger into an IFV and
+        // the art changes a beat later. The gate was right, the cadence was
+        // answering a question nobody had asked of it.
+        //
+        // So the cadence is a property of the TRAIT LIST now. A list with no
+        // proximity gate is evaluated every frame and reacts on the next one; a
+        // list that scans keeps the old interval. Lists that run every frame
+        // skip the throttle map entirely, so they do not pay a lookup and a
+        // write per unit per frame for a bound that is always already met.
+        const int cadence = CadenceFor(pList);
+        if (cadence > 1)
+        {
+            const int now = Unsorted::CurrentFrame;
+            const auto nit = g_NextCondCheck.find(pThis);
+            if (nit != g_NextCondCheck.end() && now < nit->second)
+                return;
+            g_NextCondCheck[pThis] = now + cadence;
+        }
 
         // Timed from HERE, past the cadence early-out: what matters is the
         // cost of a pass that actually runs, not of the 14 frames that skip.
