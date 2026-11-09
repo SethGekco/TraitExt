@@ -858,6 +858,18 @@ namespace
     // unit -> the clone type it should be DRAWN as.
     std::unordered_map<void*, UnitTypeClass*> g_Variant;
     std::unordered_map<void*, InfantryTypeClass*> g_VariantInf;
+    // g_Variant is read by NeedsBodyFacing, which PerfExt calls through
+    // TraitExt_TargetCheckWrites and which the GetFireError hook also reaches -
+    // both on worker threads under lane 3 - while gate evaluation writes it
+    // from TechnoClass::Update on the main thread. Same reasoning as
+    // g_VariantWeaponLock in TraitEngine.cpp: writes take it exclusively, the
+    // worker-side read takes it shared.
+    //
+    // The DRAW path reads these maps unlocked on purpose. The main thread is
+    // the only writer, so a main-thread read cannot race one; only the
+    // worker-side reads need the lock, and the draw runs every unit every
+    // frame.
+    SRWLOCK g_VariantArtLock = SRWLOCK_INIT;
     // clone type -> must aim with the body instead of a turret.
     std::unordered_map<void*, bool> g_BodyFacing;
     std::unordered_set<std::string> g_BodyFacingIDs;
@@ -911,11 +923,15 @@ namespace TraitExt
             auto* const pClone = UnitTypeClass::Find(cloneID);
             if (pClone)
             {
+                AcquireSRWLockExclusive(&g_VariantArtLock);
                 g_Variant[pThis] = pClone;
+                ReleaseSRWLockExclusive(&g_VariantArtLock);
             }
             else if (auto* const pInf = InfantryTypeClass::Find(cloneID))
             {
+                AcquireSRWLockExclusive(&g_VariantArtLock);
                 g_VariantInf[pThis] = pInf;
+                ReleaseSRWLockExclusive(&g_VariantArtLock);
             }
             else
             {
@@ -936,8 +952,10 @@ namespace TraitExt
             if (g_Swapped == static_cast<void*>(pThis)
                 || g_SwappedInf == static_cast<void*>(pThis))
                 RestorePending();
+            AcquireSRWLockExclusive(&g_VariantArtLock);
             g_Variant.erase(pThis);
             g_VariantInf.erase(pThis);
+            ReleaseSRWLockExclusive(&g_VariantArtLock);
         }
 
         void SetForceBodyFacing(const std::string& cloneID, bool on)
@@ -951,11 +969,14 @@ namespace TraitExt
         bool NeedsBodyFacing(::TechnoClass* pThis)
         {
             if (!pThis || g_BodyFacingIDs.empty())
-                return false;
+                return false;   // load-time only, so safe to read unlocked
+
+            AcquireSRWLockShared(&g_VariantArtLock);
             const auto it = g_Variant.find(pThis);
-            if (it == g_Variant.end() || !it->second)
-                return false;
-            return g_BodyFacingIDs.count(it->second->ID) != 0;
+            UnitTypeClass* const pVariant = (it == g_Variant.end()) ? nullptr : it->second;
+            ReleaseSRWLockShared(&g_VariantArtLock);
+
+            return pVariant && g_BodyFacingIDs.count(pVariant->ID) != 0;
         }
 
         bool Enabled() { return g_VariantEnabled; }

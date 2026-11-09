@@ -128,6 +128,20 @@ namespace TraitExt
     namespace
     {
         std::unordered_map<void*, TechnoTypeClass*> g_VariantWeapon;
+        // PerfExt lane 3 runs target checks - and so TechnoClass::GetWeapon -
+        // on worker threads, while gate evaluation writes this map from
+        // TechnoClass::Update on the main thread. An unordered_map insert can
+        // REHASH and an erase can free a node, either of which is undefined
+        // behaviour under a concurrent reader, so the per-unit map goes through
+        // an SRW lock: shared for the worker-side reads, exclusive for the
+        // main-thread writes. Uncontended shared acquisition is tens of
+        // nanoseconds, against a map lookup this path already pays.
+        //
+        // The other containers here (g_WeaponClones, g_DeclaredSlots,
+        // g_ForceWeapon) are written only while traits are being registered at
+        // LOAD and are read-only afterwards, which is what makes them safe to
+        // read unlocked from a target check.
+        SRWLOCK g_VariantWeaponLock = SRWLOCK_INIT;
         std::unordered_set<std::string> g_WeaponClones;
         bool g_VariantWeaponEnabled = true;
         // Slots the trait spelled out per clone, and whether that clone's own
@@ -253,7 +267,9 @@ namespace TraitExt
                         cloneID);
                 return;
             }
+            AcquireSRWLockExclusive(&g_VariantWeaponLock);
             g_VariantWeapon[pThis] = p;
+            ReleaseSRWLockExclusive(&g_VariantWeaponLock);
         }
         void DeclareSlot(const std::string& cloneID, int index)
         {
@@ -291,15 +307,29 @@ namespace TraitExt
             return it == g_ForceWeapon.end() ? g_ForceWeaponDefault : it->second;
         }
 
-        void Forget(::TechnoClass* pThis) { g_VariantWeapon.erase(pThis); }
-        bool Any() { return !g_VariantWeapon.empty(); }
+        void Forget(::TechnoClass* pThis)
+        {
+            AcquireSRWLockExclusive(&g_VariantWeaponLock);
+            g_VariantWeapon.erase(pThis);
+            ReleaseSRWLockExclusive(&g_VariantWeaponLock);
+        }
+        bool Any()
+        {
+            AcquireSRWLockShared(&g_VariantWeaponLock);
+            const bool any = !g_VariantWeapon.empty();
+            ReleaseSRWLockShared(&g_VariantWeaponLock);
+            return any;
+        }
         bool Enabled() { return g_VariantWeaponEnabled; }
         void SetEnabled(bool on) { g_VariantWeaponEnabled = on; }
 
         TechnoTypeClass* For(::TechnoClass* pThis)
         {
+            AcquireSRWLockShared(&g_VariantWeaponLock);
             const auto it = g_VariantWeapon.find(pThis);
-            return it == g_VariantWeapon.end() ? nullptr : it->second;
+            TechnoTypeClass* const p = (it == g_VariantWeapon.end()) ? nullptr : it->second;
+            ReleaseSRWLockShared(&g_VariantWeaponLock);
+            return p;
         }
     }
 
