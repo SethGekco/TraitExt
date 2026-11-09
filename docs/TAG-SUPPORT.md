@@ -96,13 +96,20 @@ change its icon.
   changing is not evidence the weapon did.
 * **A type with no `Primary` has no targeting at all** (e.g. `LCRF`). A gated
   weapon does not give it the ability to acquire a target.
-* **A gate opens up to about a second after its condition becomes true.**
-  Conditions are re-evaluated at most once every 15 frames per unit, which is
-  roughly 1s of game logic. Load a passenger or cut power and the change is
-  visibly a beat behind. This is deliberate: the check runs per unit per gate,
-  so evaluating it every frame costs CPU on every unit that carries one. If a
-  trait needs to look instant, that trade is the thing to revisit - not the
-  gate itself.
+* **How fast a gate reacts depends on whether it scans.** A trait whose gates
+  are all field reads - `RequirePassengers`, `RequirePower`,
+  `RequireHealthBelow`, `RequireVeterancy`, `RequireCountry`, `RequireMission`,
+  `RequireOwns` - is evaluated **every frame** and reacts on the next one. A
+  trait that uses a proximity gate (`NearTypes` with `NearRange`) is evaluated
+  **once every 15 frames**, because the scan walks an index that would otherwise
+  be rebuilt every frame. Mixing the two in one trait puts the whole trait on
+  the slower cadence. The log says which cadence each trait list got.
+* **A gate that has opened stays open for `GateDwell` frames (default 30).**
+  This is deadband, not latency: without it a unit sitting exactly on a
+  threshold flips every evaluation, and each flip costs an art re-assign - or,
+  for a converting trait, an HP rescale that is proportional and therefore
+  *drifts* on every round trip. It is also why running cheap gates every frame
+  is safe: the dwell, not the cadence, is what bounds the flip rate.
 * **Rollback is uneven.** `Veterancy` is restored when a gate closes;
   `Health`/`Strength` and `Ammo` are not, because gameplay moves them in
   between and restoring would undo real damage.
